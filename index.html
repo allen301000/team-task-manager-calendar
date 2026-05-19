@@ -867,39 +867,107 @@ function renderQueue(){
   }).join("");
 }
 async function syncQueueFromApi(){
-  if(!requireDb()) return;
-  if(!settings.sheetApi){toast("Chưa nhập Apps Script API URL trong Setup","#b71c1c");return}
+  console.group("[Task Queue] Sync từ Sheet API");
+  console.log("Settings:", {
+    hasSupabase: !!supabaseClient,
+    sheetApi: settings.sheetApi,
+    supabaseUrl: settings.supabaseUrl
+  });
+
+  if(!requireDb()){
+    console.error("Supabase chưa được cấu hình hoặc chưa init được client.");
+    console.groupEnd();
+    return;
+  }
+
+  if(!settings.sheetApi){
+    console.error("Thiếu Apps Script API URL trong Setup.");
+    console.groupEnd();
+    toast("Chưa nhập Apps Script API URL trong Setup","#b71c1c");
+    return;
+  }
+
   try{
     toast("Đang sync từ Sheet...","#f05a28");
 
+    console.time("Load Sheet API JSONP");
     const json = await loadSheetQueueJsonp(settings.sheetApi);
+    console.timeEnd("Load Sheet API JSONP");
+
+    console.log("Raw API response:", json);
+
+    if(!json){
+      throw new Error("Apps Script API không trả dữ liệu");
+    }
+
+    if(json.success === false){
+      throw new Error(json.error || "Apps Script API trả success=false");
+    }
+
     const rows = Array.isArray(json) ? json : (json.data || []);
+    console.log("Rows parsed:", rows.length, rows.slice(0,5));
 
     const payload = rows.map(r=>({
       source_id: String(r.source_id || r.SourceID || r.SIT || r.sit || "").trim(),
       project: String(r.project || r.Project || r.Projects || "").trim(),
       am: String(r.am || r.AM || "").trim(),
       start_date: toDateInput(r.start || r.Start || r.start_date),
-      expired_date: toDateInput(r.expired || r.Expired || r.expired_date),
-      template_url: String(r.template || r.template_url || r["Template màu"] || "").trim(),
-      layout_url: String(r.layout || r.layout_url || r["Layout web"] || "").trim(),
-      package_name: r.package_name || getPackageFromSourceId(r.source_id || r.SIT || r.sit),
-      source_status: r.status || r.Status || "Doing",
-      queue_status: "NEW"
-    })).filter(r=>r.source_id && r.project);
+      expired_date: toDateInput(r.expired || r.Expired || r.expired_dafunction loadSheetQueueJsonp(apiUrl){
+  return new Promise((resolve,reject)=>{
+    const callbackName = "sheetQueueCb_" + Date.now() + "_" + Math.floor(Math.random()*100000);
+    const sep = apiUrl.includes("?") ? "&" : "?";
+    const url = `${apiUrl}${sep}action=queue&callback=${callbackName}`;
 
-    if(!payload.length){toast("API không có task hợp lệ","#8a6d00");return}
+    console.log("JSONP callback name:", callbackName);
+    console.log("JSONP request URL:", url);
 
-    const {error}=await supabaseClient
-      .from("task_queue")
-      .upsert(payload,{onConflict:"source_id",ignoreDuplicates:false});
+    const script = document.createElement("script");
+    const timer = setTimeout(()=>{
+      cleanup();
+      reject(new Error("Sheet API timeout sau 20s. Kiểm tra URL deploy / quyền access / lỗi Apps Script."));
+    },20000);
+
+    function cleanup(){
+      clearTimeout(timer);
+      delete window[callbackName];
+      if(script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    window[callbackName] = data => {
+      console.log("JSONP callback received:", data);
+      cleanup();
+      resolve(data);
+    };
+
+    script.onerror = event => {
+      console.error("JSONP script load error:", event);
+      cleanup();
+      reject(new Error("Không load được Apps Script API. Mở JSONP request URL trên browser để xem lỗi deploy/quyền/script."));
+    };
+
+    script.onload = () => {
+      console.log("JSONP script loaded. Nếu không thấy 'callback received' thì Apps Script chưa trả đúng dạng callback(...).");
+    };
+
+    script.src = url;
+    document.body.appendChild(script);
+  });
+}
+
+async function skipQueuet();
+    console.timeEnd("Supabase upsert task_queue");
+
+    console.log("Supabase upsert result:", {data,error});
 
     if(error) throw error;
 
     toast(`Đã sync ${payload.length} task vào queue`,"#2e7d32");
     await loadQueue();
   }catch(e){
-    toast("Sync lỗi: "+e.message,"#b71c1c");
+    console.error("[Task Queue] Sync lỗi:", e);
+    toast("Sync lỗi: "+(e.message || e),"#b71c1c");
+  }finally{
+    console.groupEnd();
   }
 }
 
