@@ -873,8 +873,10 @@ async function syncQueueFromApi(){
     toast("Đang sync từ Sheet...","#1565c0");
     const res = await fetch(settings.sheetApi);
     if(!res.ok) throw new Error(await res.text());
-    const rows = await res.json();
-    const payload = (Array.isArray(rows)?rows:[]).map(r=>({
+const json = await res.json();
+const rows = Array.isArray(json) ? json : (json.data || []);
+
+const payload = rows.map(r=>({
       source_id: String(r.source_id || r.SourceID || r.SIT || r.sit || "").trim(),
       project: String(r.project || r.Project || r.Projects || "").trim(),
       am: String(r.am || r.AM || "").trim(),
