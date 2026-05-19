@@ -870,13 +870,12 @@ async function syncQueueFromApi(){
   if(!requireDb()) return;
   if(!settings.sheetApi){toast("Chưa nhập Apps Script API URL trong Setup","#b71c1c");return}
   try{
-    toast("Đang sync từ Sheet...","#1565c0");
-    const res = await fetch(settings.sheetApi);
-    if(!res.ok) throw new Error(await res.text());
-const json = await res.json();
-const rows = Array.isArray(json) ? json : (json.data || []);
+    toast("Đang sync từ Sheet...","#f05a28");
 
-const payload = rows.map(r=>({
+    const json = await loadSheetQueueJsonp(settings.sheetApi);
+    const rows = Array.isArray(json) ? json : (json.data || []);
+
+    const payload = rows.map(r=>({
       source_id: String(r.source_id || r.SourceID || r.SIT || r.sit || "").trim(),
       project: String(r.project || r.Project || r.Projects || "").trim(),
       am: String(r.am || r.AM || "").trim(),
@@ -888,13 +887,55 @@ const payload = rows.map(r=>({
       source_status: r.status || r.Status || "Doing",
       queue_status: "NEW"
     })).filter(r=>r.source_id && r.project);
+
     if(!payload.length){toast("API không có task hợp lệ","#8a6d00");return}
-    const {error}=await supabaseClient.from("task_queue").upsert(payload,{onConflict:"source_id",ignoreDuplicates:false});
+
+    const {error}=await supabaseClient
+      .from("task_queue")
+      .upsert(payload,{onConflict:"source_id",ignoreDuplicates:false});
+
     if(error) throw error;
+
     toast(`Đã sync ${payload.length} task vào queue`,"#2e7d32");
     await loadQueue();
-  }catch(e){toast("Sync lỗi: "+e.message,"#b71c1c")}
+  }catch(e){
+    toast("Sync lỗi: "+e.message,"#b71c1c");
+  }
 }
+
+function loadSheetQueueJsonp(apiUrl){
+  return new Promise((resolve,reject)=>{
+    const callbackName = "sheetQueueCb_" + Date.now() + "_" + Math.floor(Math.random()*100000);
+    const sep = apiUrl.includes("?") ? "&" : "?";
+    const url = `${apiUrl}${sep}action=queue&callback=${callbackName}`;
+
+    const script = document.createElement("script");
+    const timer = setTimeout(()=>{
+      cleanup();
+      reject(new Error("Sheet API timeout"));
+    },20000);
+
+    function cleanup(){
+      clearTimeout(timer);
+      delete window[callbackName];
+      if(script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    window[callbackName] = data => {
+      cleanup();
+      resolve(data);
+    };
+
+    script.onerror = () => {
+      cleanup();
+      reject(new Error("Không load được Apps Script API"));
+    };
+
+    script.src = url;
+    document.body.appendChild(script);
+  });
+}
+
 async function skipQueue(sourceId){
   if(!requireDb()) return;
   const {error}=await supabaseClient.from("task_queue").update({queue_status:"SKIPPED",updated_at:new Date().toISOString()}).eq("source_id",sourceId);
