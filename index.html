@@ -432,7 +432,91 @@ function renderQueue(){const st=queueStatusFilter.value,pkg=queuePackageFilter.v
 async function syncQueueFromApi(){clearDebug();console.group("[Task Queue] Sync từ Sheet API");logDebug("[Task Queue] Sync từ Sheet API");if(!requireDb()){console.groupEnd();return}if(!settings.sheetApi){toast("Chưa nhập Apps Script API URL","#b71c1c");console.groupEnd();return}try{toast("Đang sync từ Sheet...","#f05a28");const json=await loadSheetQueueJsonp(settings.sheetApi);logDebug("Raw API response",json);if(!json)throw new Error("Apps Script API không trả dữ liệu");if(json.success===false)throw new Error(json.error||"Apps Script API success=false");const rows=Array.isArray(json)?json:(json.data||[]);const nowIso=new Date().toISOString();await supabaseClient.from("task_queue").update({is_current:false}).neq("source_id","__never__");let payload=rows.map((r,idx)=>{const project=String(r.project||r.Project||r.Projects||"").trim();let sourceId=normalizeProjectId(project||r.source_id||"");if(!sourceId)sourceId="ROW-"+String(r.row_number||idx+1);return{source_id:sourceId,project,am:String(r.am||r.AM||"").trim(),start_date:toDateInput(r.start||r.Start||r.start_date),expired_date:toDateInput(r.expired||r.Expired||r.expired_date),template_url:String(r.template||r.template_url||r["Template màu"]||"").trim(),layout_url:String(r.layout||r.layout_url||r["Layout web"]||"").trim(),package_name:r.package_name||pkgFromId(sourceId),source_status:r.status||r.Status||"Doing",queue_status:"NEW",source_row:r.row_number?String(r.row_number):null,note:r.note||null,is_current:true,last_seen_at:nowIso,updated_at:nowIso}}).filter(r=>r.source_id&&r.project);const seen=new Set();payload=payload.filter(x=>{if(seen.has(x.source_id)){logDebug("Duplicate source_id skipped",x.source_id);return false}seen.add(x.source_id);return true});logDebug("Payload", {total:payload.length, firstFive:payload.slice(0,5)});if(!payload.length){toast("API không có task hợp lệ","#8a6d00");return}const {data,error}=await supabaseClient.from("task_queue").upsert(payload,{onConflict:"source_id",ignoreDuplicates:false}).select();logDebug("Supabase upsert result",{count:data?data.length:0,error});if(error)throw error;queueStatusFilter.value="CURRENT";toast(`Đã sync ${payload.length} task vào queue`,"#2e7d32");await loadQueue()}catch(e){console.error(e);logDebug("SYNC ERROR",e.message||e);toast("Sync lỗi: "+(e.message||e),"#b71c1c")}finally{console.groupEnd()}}
 function loadSheetQueueJsonp(apiUrl){return new Promise((resolve,reject)=>{const cb="sheetQueueCb_"+Date.now()+"_"+Math.floor(Math.random()*100000);const sep=apiUrl.includes("?")?"&":"?";const url=`${apiUrl}${sep}action=queue&callback=${cb}`;logDebug("JSONP request URL",url);const s=document.createElement("script");const timer=setTimeout(()=>{cleanup();reject(new Error("Sheet API timeout sau 20s"))},20000);function cleanup(){clearTimeout(timer);delete window[cb];if(s.parentNode)s.parentNode.removeChild(s)}window[cb]=data=>{logDebug("JSONP callback received",data);cleanup();resolve(data)};s.onerror=()=>{cleanup();reject(new Error("Không load được Apps Script API"))};s.onload=()=>logDebug("JSONP script loaded");s.src=url;document.body.appendChild(s)})}
 async function skipQueue(id){if(!requireDb())return;const {error}=await supabaseClient.from("task_queue").update({queue_status:"SKIPPED",updated_at:new Date().toISOString()}).eq("source_id",id);if(error){toast(error.message,"#b71c1c");return}await loadQueue()}
-async function unassignQueue(sourceId){if(!requireDb())return;if(!confirm("Hủy assign task này và trả về Tiệm mới đủ info?"))return;const {error:delErr}=await supabaseClient.from("tasks").delete().eq("source_id",sourceId);if(delErr){toast("Lỗi xóa task calendar: "+delErr.message,"#b71c1c");return}const {error:qErr}=await supabaseClient.from("task_queue").update({queue_status:"NEW",assigned_person:null,assigned_date:null,priority:"Normal",is_current:true,updated_at:new Date().toISOString()}).eq("source_id",sourceId);if(qErr){toast("Lỗi trả queue: "+qErr.message,"#b71c1c");return}await logAction("unassign",null,sourceId,sourceId,"","Unassign from queue");toast("Đã hủy assign và trả về queue","#2e7d32");await Promise.all([loadQueue(),render()])}
+async function unassignQueue(sourceId){
+  if(!requireDb())return;
+
+  if(!confirm("Hủy assign task này và trả về Tiệm mới đủ info?"))return;
+
+  const {data:oldTasks,error:readErr}=await supabaseClient
+    .from("tasks")
+    .select("id,source_id,text,person,am,task_date,type,priority")
+    .eq("source_id",sourceId);
+
+  if(readErr){
+    toast("Lỗi đọc task trước khi unassign: "+readErr.message,"#b71c1c");
+    return;
+  }
+
+  const oldTask=(oldTasks&&oldTasks.length)?oldTasks[0]:null;
+
+  const {error:delErr}=await supabaseClient
+    .from("tasks")
+    .delete()
+    .eq("source_id",sourceId);
+
+  if(delErr){
+    toast("Lỗi xóa task calendar: "+delErr.message,"#b71c1c");
+    return;
+  }
+
+  const {error:qErr}=await supabaseClient
+    .from("task_queue")
+    .update({
+      queue_status:"NEW",
+      assigned_person:null,
+      assigned_date:null,
+      priority:"Normal",
+      is_current:true,
+      updated_at:new Date().toISOString()
+    })
+    .eq("source_id",sourceId);
+
+  if(qErr){
+    toast("Lỗi trả queue: "+qErr.message,"#b71c1c");
+    return;
+  }
+
+  if(oldTask){
+    const personM=memberByName(oldTask.person);
+    const amM=memberByName(oldTask.am);
+
+    await sendTelegram({
+      event:"delete",
+      person:oldTask.person||"",
+      person_chat_id:personM?.telegram_chat_id||"",
+      am:oldTask.am||"",
+      am_chat_id:amM?.telegram_chat_id||"",
+      message:
+        `Project: ${oldTask.text||sourceId}
+`+
+        `Action: UNASSIGN / RETURN TO QUEUE
+
+`+
+        `Old Date: ${oldTask.task_date||""}
+`+
+        `Old Member: ${oldTask.person||""}
+`+
+        `Old AM: ${oldTask.am||""}
+`+
+        `Old Type: ${oldTask.type||""}`
+    });
+
+    await logAction(
+      "unassign",
+      oldTask.id,
+      sourceId,
+      oldTask.text||sourceId,
+      oldTask.person||"",
+      `Unassign from queue. Old date: ${oldTask.task_date||""}, old AM: ${oldTask.am||""}`,
+      oldTask.am||""
+    );
+  }else{
+    await logAction("unassign",null,sourceId,sourceId,"","Unassign from queue but no task row found","");
+  }
+
+  toast("Đã hủy assign, gửi Telegram và trả về queue","#2e7d32");
+  await Promise.all([loadQueue(),render()]);
+}
 
 async function openAssign(id){
   selectedQueue=queueRows.find(r=>r.source_id===id);
@@ -579,11 +663,321 @@ function renderCalendarOnly(){calendar.innerHTML="";calendarTitle.textContent=`T
 function taskEl(t,d){const el=document.createElement("div");el.className="task"+(t.done?" done":"");el.style.background=personColor(t.person);el.draggable=canEdit;el.ondragstart=()=>{dragTask=t;dragFromDay=d;dragFromIndex=cache[d].indexOf(t)};el.ondragover=e=>canEdit&&e.preventDefault();el.ondrop=e=>{e.preventDefault();reorderInDay(d,t)};if(canEdit)el.onclick=()=>toggleDone(t);el.innerHTML=`<div class="tt">${esc(t.text)}</div><div class="tm">${esc(t.person)} • ${esc(t.type)} (AM: ${esc(t.am||"N/A")})</div>`;if(canEdit){const a=document.createElement("div");a.className="act";a.innerHTML=`<button class="mini">✏</button><button class="mini">📋</button><button class="mini">✖</button>`;a.children[0].onclick=e=>{e.stopPropagation();openEditTask(t,d)};a.children[1].onclick=e=>{e.stopPropagation();navigator.clipboard.writeText(t.text);toast("Copied","#2e7d32")};a.children[2].onclick=e=>{e.stopPropagation();removeTask(t.id)};el.appendChild(a)}return el}
 function openAddTask(d){selectedDay=d;editingTask=null;refreshDropdowns();taskModalTitle.textContent="Add task";taskText.value="";taskPerson.value=peopleNames()[0]||"Allen";taskType.value=TYPES[0];taskAM.value="None";taskPriority.value="Normal";taskNote.value="";openModal("taskModal")}
 function openEditTask(t,d){selectedDay=d;editingTask=t;refreshDropdowns(t.am||"None");taskModalTitle.textContent="Edit task";taskText.value=t.text;taskPerson.value=t.person;taskType.value=t.type;taskAM.value=t.am||"None";taskPriority.value=t.priority||"Normal";taskNote.value=t.note||"";openModal("taskModal")}
-async function saveTaskFromModal(){if(!requireDb()||!canEdit||!selectedDay)return;const task_date=formatDate(current.getFullYear(),current.getMonth(),selectedDay);const p={text:taskText.value.trim(),person:taskPerson.value,type:taskType.value,am:taskAM.value||"None",priority:taskPriority.value,note:taskNote.value||null};if(!p.text){toast("Empty task","#b71c1c");return}let error,taskId=editingTask?.id||null;if(editingTask){({error}=await supabaseClient.from("tasks").update(p).eq("id",editingTask.id));await logAction("update",editingTask.id,editingTask.source_id||"",p.text,p.person,"Updated task",p.am)}else{const res=await supabaseClient.from("tasks").insert({...p,task_date,done:false,sort_order:(cache[selectedDay]?.length||0)}).select("id").single();error=res.error;taskId=res.data?.id;await logAction("manual_add",taskId,"",p.text,p.person,"Manual add",p.am)}if(error){toast(error.message,"#b71c1c");return}const personM=memberByName(p.person),amM=memberByName(p.am);await sendTelegram({event:editingTask?"update":"new",person:p.person,person_chat_id:personM?.telegram_chat_id||"",am:p.am,am_chat_id:amM?.telegram_chat_id||"",type:p.type,message:`Project: ${p.text}\nType: ${p.type}\n\nMember: ${p.person}\nAM: ${p.am}\n📅 ${task_date}`});closeModal("taskModal");toast("Saved","#2e7d32");await render()}
+async function saveTaskFromModal(){
+  if(!requireDb()||!canEdit||!selectedDay)return;
+
+  const task_date=formatDate(current.getFullYear(),current.getMonth(),selectedDay);
+
+  const p={
+    text:taskText.value.trim(),
+    person:taskPerson.value,
+    type:taskType.value,
+    am:taskAM.value||"None",
+    priority:taskPriority.value,
+    note:taskNote.value||null
+  };
+
+  if(!p.text){
+    toast("Empty task","#b71c1c");
+    return;
+  }
+
+  let error;
+  let taskId=editingTask?.id||null;
+
+  if(editingTask){
+    const oldTask={...editingTask};
+
+    ({error}=await supabaseClient
+      .from("tasks")
+      .update(p)
+      .eq("id",editingTask.id));
+
+    if(error){
+      toast(error.message,"#b71c1c");
+      return;
+    }
+
+    const changeLines=[
+      `Project: ${oldTask.text||""}`,
+      `Action: TASK UPDATED`,
+      ``,
+      `Task Name: ${oldTask.text||""} → ${p.text}`,
+      `Member: ${oldTask.person||""} → ${p.person}`,
+      `AM: ${oldTask.am||""} → ${p.am}`,
+      `Type: ${oldTask.type||""} → ${p.type}`,
+      `Priority: ${oldTask.priority||"Normal"} → ${p.priority}`,
+      `Date: ${oldTask.task_date||task_date}`,
+      `Note: ${oldTask.note||""} → ${p.note||""}`
+    ].join("
+");
+
+    const newPersonM=memberByName(p.person);
+    const newAmM=memberByName(p.am);
+
+    await sendTelegram({
+      event:"update",
+      person:p.person,
+      person_chat_id:newPersonM?.telegram_chat_id||"",
+      am:p.am,
+      am_chat_id:newAmM?.telegram_chat_id||"",
+      type:p.type,
+      message:changeLines
+    });
+
+    if(oldTask.person && oldTask.person!==p.person){
+      const oldPersonM=memberByName(oldTask.person);
+      await sendTelegram({
+        event:"update",
+        person:oldTask.person,
+        person_chat_id:oldPersonM?.telegram_chat_id||"",
+        am:"",
+        am_chat_id:"",
+        type:p.type,
+        message:
+          `Project: ${oldTask.text||""}
+`+
+          `Action: TASK REASSIGNED
+
+`+
+          `Old Member: ${oldTask.person}
+`+
+          `New Member: ${p.person}
+`+
+          `Date: ${oldTask.task_date||task_date}`
+      });
+    }
+
+    if(oldTask.am && oldTask.am!==p.am){
+      const oldAmM=memberByName(oldTask.am);
+      await sendTelegram({
+        event:"update",
+        person:p.person,
+        person_chat_id:"",
+        am:oldTask.am,
+        am_chat_id:oldAmM?.telegram_chat_id||"",
+        type:p.type,
+        message:
+          `Project: ${oldTask.text||""}
+`+
+          `Action: AM CHANGED
+
+`+
+          `Old AM: ${oldTask.am}
+`+
+          `New AM: ${p.am}
+`+
+          `Member: ${p.person}
+`+
+          `Date: ${oldTask.task_date||task_date}`
+      });
+    }
+
+    await logAction(
+      "update",
+      editingTask.id,
+      editingTask.source_id||"",
+      p.text,
+      p.person,
+      changeLines,
+      p.am
+    );
+
+  }else{
+    const res=await supabaseClient
+      .from("tasks")
+      .insert({
+        ...p,
+        task_date,
+        done:false,
+        sort_order:(cache[selectedDay]?.length||0)
+      })
+      .select("id")
+      .single();
+
+    error=res.error;
+    taskId=res.data?.id;
+
+    if(error){
+      toast(error.message,"#b71c1c");
+      return;
+    }
+
+    await logAction("manual_add",taskId,"",p.text,p.person,"Manual add",p.am);
+
+    const personM=memberByName(p.person);
+    const amM=memberByName(p.am);
+
+    await sendTelegram({
+      event:"new",
+      person:p.person,
+      person_chat_id:personM?.telegram_chat_id||"",
+      am:p.am,
+      am_chat_id:amM?.telegram_chat_id||"",
+      type:p.type,
+      message:
+        `Project: ${p.text}
+`+
+        `Type: ${p.type}
+
+`+
+        `Member: ${p.person}
+`+
+        `AM: ${p.am}
+`+
+        `📅 ${task_date}`
+    });
+  }
+
+  closeModal("taskModal");
+  toast("Saved","#2e7d32");
+  await render();
+}
 async function toggleDone(t){if(!requireDb()||!canEdit)return;t.done=!t.done;renderCalendarOnly();const {error}=await supabaseClient.from("tasks").update({done:t.done}).eq("id",t.id);if(error){toast(error.message,"#b71c1c");return}await logAction(t.done?"done":"undone",t.id,t.source_id||"",t.text,t.person,"Toggle done",t.am);if(t.done){const personM=memberByName(t.person),amM=memberByName(t.am);await sendTelegram({event:"done",person:t.person,person_chat_id:personM?.telegram_chat_id||"",am:t.am,am_chat_id:amM?.telegram_chat_id||"",message:`✅ Completed\n${t.text}`})}}
-async function removeTask(id){if(!requireDb()||!canEdit)return;const {data:task,error:readErr}=await supabaseClient.from("tasks").select("id,source_id,text,person,am").eq("id",id).single();if(readErr){toast("Lỗi đọc task: "+readErr.message,"#b71c1c");return}const {error:delErr}=await supabaseClient.from("tasks").delete().eq("id",id);if(delErr){toast(delErr.message,"#b71c1c");return}if(task?.source_id){const {error:qErr}=await supabaseClient.from("task_queue").update({queue_status:"NEW",assigned_person:null,assigned_date:null,priority:"Normal",is_current:true,updated_at:new Date().toISOString()}).eq("source_id",task.source_id);if(qErr){toast("Đã xóa nhưng lỗi trả queue: "+qErr.message,"#b71c1c")}}await logAction("delete",id,task?.source_id||"",task?.text||"",task?.person||"","Deleted task and returned queue",task?.am||"");const personM=memberByName(task?.person),amM=memberByName(task?.am);await sendTelegram({event:"delete",person:task?.person||"",person_chat_id:personM?.telegram_chat_id||"",am:task?.am||"",am_chat_id:amM?.telegram_chat_id||"",message:`Project: ${task?.text||""}`});toast("Đã xóa task và trả về queue","#2e7d32");await Promise.all([loadQueue(),render()])}
+async function removeTask(id){
+  if(!requireDb()||!canEdit)return;
+
+  const {data:task,error:readErr}=await supabaseClient
+    .from("tasks")
+    .select("id,source_id,text,person,am,task_date,type,priority")
+    .eq("id",id)
+    .single();
+
+  if(readErr){
+    toast("Lỗi đọc task: "+readErr.message,"#b71c1c");
+    return;
+  }
+
+  const {error:delErr}=await supabaseClient
+    .from("tasks")
+    .delete()
+    .eq("id",id);
+
+  if(delErr){
+    toast(delErr.message,"#b71c1c");
+    return;
+  }
+
+  if(task?.source_id){
+    const {error:qErr}=await supabaseClient
+      .from("task_queue")
+      .update({
+        queue_status:"NEW",
+        assigned_person:null,
+        assigned_date:null,
+        priority:"Normal",
+        is_current:true,
+        updated_at:new Date().toISOString()
+      })
+      .eq("source_id",task.source_id);
+
+    if(qErr){
+      toast("Đã xóa nhưng lỗi trả queue: "+qErr.message,"#b71c1c");
+    }
+  }
+
+  const detailMessage=
+    `Project: ${task?.text||""}
+`+
+    `Action: TASK DELETED / RETURN TO QUEUE
+
+`+
+    `Old Date: ${task?.task_date||""}
+`+
+    `Old Member: ${task?.person||""}
+`+
+    `Old AM: ${task?.am||""}
+`+
+    `Old Type: ${task?.type||""}`;
+
+  await logAction(
+    "delete",
+    id,
+    task?.source_id||"",
+    task?.text||"",
+    task?.person||"",
+    detailMessage,
+    task?.am||""
+  );
+
+  const personM=memberByName(task?.person);
+  const amM=memberByName(task?.am);
+
+  await sendTelegram({
+    event:"delete",
+    person:task?.person||"",
+    person_chat_id:personM?.telegram_chat_id||"",
+    am:task?.am||"",
+    am_chat_id:amM?.telegram_chat_id||"",
+    message:detailMessage
+  });
+
+  toast("Đã xóa task, gửi Telegram và trả về queue","#2e7d32");
+  await Promise.all([loadQueue(),render()]);
+}
 async function reorderInDay(day,target){if(!dragTask||day!==dragFromDay)return;const list=cache[day],from=dragFromIndex,to=list.indexOf(target);if(from===to)return;list.splice(from,1);list.splice(to,0,dragTask);list.forEach((t,i)=>t.sort_order=i);renderCalendarOnly();await Promise.all(list.map(t=>supabaseClient.from("tasks").update({sort_order:t.sort_order}).eq("id",t.id)));dragTask=null}
-async function dropToOtherDay(day){if(!dragTask||day===dragFromDay)return;cache[dragFromDay]=cache[dragFromDay].filter(t=>t!==dragTask);dragTask.task_date=formatDate(current.getFullYear(),current.getMonth(),day);(cache[day]??=[]).push(dragTask);cache[day].forEach((t,i)=>t.sort_order=i);renderCalendarOnly();await supabaseClient.from("tasks").update({task_date:dragTask.task_date,sort_order:cache[day].indexOf(dragTask)}).eq("id",dragTask.id);await logAction("move",dragTask.id,dragTask.source_id||"",dragTask.text,dragTask.person,`Moved to ${dragTask.task_date}`,dragTask.am);const personM=memberByName(dragTask.person),amM=memberByName(dragTask.am);await sendTelegram({event:"move",person:dragTask.person,person_chat_id:personM?.telegram_chat_id||"",am:dragTask.am,am_chat_id:amM?.telegram_chat_id||"",message:`Project: ${dragTask.text}\n\n📅 New Date: ${dragTask.task_date}`});dragTask=null}
+async function dropToOtherDay(day){
+  if(!dragTask||day===dragFromDay)return;
+
+  const oldDate=dragTask.task_date;
+  const oldDay=dragFromDay;
+
+  cache[dragFromDay]=cache[dragFromDay].filter(t=>t!==dragTask);
+
+  const newDate=formatDate(current.getFullYear(),current.getMonth(),day);
+  dragTask.task_date=newDate;
+
+  (cache[day]??=[]).push(dragTask);
+  cache[day].forEach((t,i)=>t.sort_order=i);
+
+  renderCalendarOnly();
+
+  await supabaseClient
+    .from("tasks")
+    .update({
+      task_date:newDate,
+      sort_order:cache[day].indexOf(dragTask)
+    })
+    .eq("id",dragTask.id);
+
+  const detailMessage=
+    `Project: ${dragTask.text}
+`+
+    `Action: TASK MOVED
+
+`+
+    `Old Date: ${oldDate||""}
+`+
+    `New Date: ${newDate}
+`+
+    `Member: ${dragTask.person||""}
+`+
+    `AM: ${dragTask.am||""}`;
+
+  await logAction(
+    "move",
+    dragTask.id,
+    dragTask.source_id||"",
+    dragTask.text,
+    dragTask.person,
+    `Moved from ${oldDate||oldDay} to ${newDate}`,
+    dragTask.am
+  );
+
+  const personM=memberByName(dragTask.person);
+  const amM=memberByName(dragTask.am);
+
+  await sendTelegram({
+    event:"move",
+    person:dragTask.person,
+    person_chat_id:personM?.telegram_chat_id||"",
+    am:dragTask.am,
+    am_chat_id:amM?.telegram_chat_id||"",
+    message:detailMessage
+  });
+
+  dragTask=null;
+}
 function changeMonth(n){current.setMonth(current.getMonth()+n);render()}
 
 function renderWorkload(){const date=workloadDate.value||todayStr(),tasks=Object.values(cache).flat(),byD={},byM={};webMembers().forEach(m=>{byD[m.name]={count:0,points:0,max:m.max_per_day||999};byM[m.name]={total:0,done:0,pending:0}});tasks.forEach(t=>{const pkg=t.package_name||pkgFromId(t.source_id);if(t.task_date===date&&byD[t.person]){byD[t.person].count++;byD[t.person].points+=pointFor(pkg,t.priority)}if(byM[t.person]){byM[t.person].total++;t.done?byM[t.person].done++:byM[t.person].pending++}});workloadDayBody.innerHTML=webMembers().map(m=>{const v=byD[m.name];const lab=v.count>=v.max?'<span class="badge urgent">Quá tải</span>':v.points>=1.8?'<span class="badge pending">Hơi tải</span>':'<span class="badge assigned">OK</span>';return`<tr><td><b>${esc(m.name)}</b></td><td>${v.count}/${v.max}</td><td>${v.points.toFixed(1)}</td><td>${lab}</td></tr>`}).join("");workloadMonthBody.innerHTML=webMembers().map(m=>{const v=byM[m.name];return`<tr><td><b>${esc(m.name)}</b></td><td>${v.total}</td><td>${v.done}</td><td>${v.pending}</td></tr>`}).join("")}
