@@ -1043,7 +1043,120 @@ create index if not exists tasks_task_date_idx on public.tasks(task_date);</text
     function inferType(r) { const t = String(r.template_url || "").trim(), l = String(r.layout_url || "").trim(); if (t && l) return "Design + QR"; if (t) return "Design"; if (l) return "Menu + QR"; return "Design + QR" }
     function suggestPerson(date) { const by = getTasksByPersonForDate(date); let best = PEOPLE_ORDER[0], min = Infinity; PEOPLE_ORDER.forEach(p => { const n = by[p] || 0; if (n < min) { min = n; best = p } }); return best }
     function getTasksByPersonForDate(date) { const by = {}; Object.values(cache).flat().filter(t => t.task_date === date).forEach(t => by[t.person] = (by[t.person] || 0) + 1); return by }
-    async function assignQueueTask() { if (!requireDb() || !selectedQueue) return; const person = assignPerson.value, taskDate = assignDate.value, type = assignType.value, am = assignAM.value || "None", text = assignText.value.trim(); if (!text || !person || !taskDate || !type) { toast("Thiếu thông tin assign", "#b71c1c"); return } const payload = { source_id: selectedQueue.source_id, task_date: taskDate, text, person, type, am, done: false, sort_order: 999, priority: assignPriority.value, package_name: selectedQueue.package_name || pkgFromId(selectedQueue.source_id), note: assignNote.value || null }; const { data, error } = await supabaseClient.from("tasks").upsert(payload, { onConflict: "source_id" }).select("id").single(); if (error) { toast("Lỗi assign: " + error.message, "#b71c1c"); return } await supabaseClient.from("task_queue").update({ queue_status: "ASSIGNED", assigned_task_id: data?.id, assigned_person: person, assigned_date: taskDate, priority: assignPriority.value, updated_at: new Date().toISOString() }).eq("source_id", selectedQueue.source_id); await sendTelegram({ event: "new", person, type, am, message: `Project: ${text}\nType: ${type}\n\nMember: ${person}\nAM: ${am}\n📅 ${taskDate}` }); closeModal("assignModal"); toast("Đã add vào calendar", "#2e7d32"); await Promise.all([loadQueue(), render()]) }
+   async function assignQueueTask() {
+  if (!requireDb() || !selectedQueue) return;
+
+  const person = assignPerson.value;
+  const taskDate = assignDate.value;
+  const type = assignType.value;
+  const am = assignAM.value || "None";
+  const text = assignText.value.trim();
+
+  if (!text || !person || !taskDate || !type) {
+    toast("Thiếu thông tin assign", "#b71c1c");
+    return;
+  }
+
+  const sourceId = selectedQueue.source_id;
+
+  const payload = {
+    source_id: sourceId,
+    task_date: taskDate,
+    text,
+    person,
+    type,
+    am,
+    done: false,
+    sort_order: 999,
+    priority: assignPriority.value,
+    package_name: selectedQueue.package_name || pkgFromId(sourceId),
+    note: assignNote.value || null
+  };
+
+  let taskId = null;
+
+  // 1. Check task đã tồn tại theo source_id chưa
+  const { data: existingTasks, error: checkError } = await supabaseClient
+    .from("tasks")
+    .select("id")
+    .eq("source_id", sourceId)
+    .limit(1);
+
+  if (checkError) {
+    toast("Lỗi check task: " + checkError.message, "#b71c1c");
+    console.error(checkError);
+    return;
+  }
+
+  // 2. Nếu đã có thì update
+  if (existingTasks && existingTasks.length > 0) {
+    taskId = existingTasks[0].id;
+
+    const { error: updateError } = await supabaseClient
+      .from("tasks")
+      .update(payload)
+      .eq("id", taskId);
+
+    if (updateError) {
+      toast("Lỗi update task: " + updateError.message, "#b71c1c");
+      console.error(updateError);
+      return;
+    }
+
+  } else {
+    // 3. Nếu chưa có thì insert mới
+    const { data: insertedTask, error: insertError } = await supabaseClient
+      .from("tasks")
+      .insert(payload)
+      .select("id")
+      .single();
+
+    if (insertError) {
+      toast("Lỗi insert task: " + insertError.message, "#b71c1c");
+      console.error(insertError);
+      return;
+    }
+
+    taskId = insertedTask?.id || null;
+  }
+
+  // 4. Update lại task_queue thành ASSIGNED
+  const { error: queueError } = await supabaseClient
+    .from("task_queue")
+    .update({
+      queue_status: "ASSIGNED",
+      assigned_task_id: taskId,
+      assigned_person: person,
+      assigned_date: taskDate,
+      priority: assignPriority.value,
+      updated_at: new Date().toISOString()
+    })
+    .eq("source_id", sourceId);
+
+  if (queueError) {
+    toast("Task đã add nhưng lỗi update queue: " + queueError.message, "#b71c1c");
+    console.error(queueError);
+    return;
+  }
+
+  await sendTelegram({
+    event: "new",
+    person,
+    type,
+    am,
+    message:
+      `Project: ${text}\n` +
+      `Type: ${type}\n\n` +
+      `Member: ${person}\n` +
+      `AM: ${am}\n` +
+      `📅 ${taskDate}`
+  });
+
+  closeModal("assignModal");
+  toast("Đã add vào calendar", "#2e7d32");
+
+  await Promise.all([loadQueue(), render()]);
+}
     async function markQueuePending() { if (!requireDb() || !selectedQueue) return; await supabaseClient.from("task_queue").update({ queue_status: "PENDING_INFO", updated_at: new Date().toISOString() }).eq("source_id", selectedQueue.source_id); closeModal("assignModal"); await loadQueue() }
     function openBulkAutoAssign() { toast("Gợi ý: bấm Assign, hệ thống tự chọn người ít task nhất theo ngày", "#f05a28") }
     async function loadCalendarTasks() { if (!requireDb()) return; const y = current.getFullYear(), m = current.getMonth(); const start = formatDate(y, m, 1), end = formatDate(y, m, new Date(y, m + 1, 0).getDate()); const { data, error } = await supabaseClient.from("tasks").select("*").gte("task_date", start).lte("task_date", end).order("sort_order", { ascending: true }); if (error) { toast("Lỗi load calendar: " + error.message, "#b71c1c"); return } cache = {}; (data || []).forEach(t => { const d = +String(t.task_date).slice(8, 10); (cache[d] ??= []).push(t) }); renderQueueKpis() }
