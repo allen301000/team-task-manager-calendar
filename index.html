@@ -709,8 +709,7 @@ async function saveTaskFromModal(){
       `Priority: ${oldTask.priority||"Normal"} → ${p.priority}`,
       `Date: ${oldTask.task_date||task_date}`,
       `Note: ${oldTask.note||""} → ${p.note||""}`
-    ].join("
-");
+    ].join("\n");
 
     const newPersonM=memberByName(p.person);
     const newAmM=memberByName(p.am);
