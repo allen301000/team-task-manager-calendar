@@ -125,7 +125,7 @@
         <div class="tools">
           <button class="primary" onclick="syncQueueFromApi()">Sync từ Sheet API</button>
           <button onclick="loadQueue()">Reload Queue</button>
-          <button onclick="openBulkAutoAssign()">Auto suggest</button>
+          <button class="primary" onclick="bulkAssignSelected()">Assign hàng loạt</button>
           <button class="warn" onclick="notifyManualDomain()">Thông báo domain thủ công</button>
           <button class="ghost" onclick="toast('Chức năng tạo domain tự động sẽ bổ sung sau', '#8a6d00')">Tạo domain tự động</button>
         </div>
@@ -499,7 +499,7 @@ async function notifyManualDomain(){
     return `${projectName} - ${domain}`;
   });
 
-  const message=`${mention}\n\n${lines.join("\\n")}`;
+  const message=`${mention}\n\n${lines.join("\n")}`;
 
   await sendTelegram({
     event:"domain_manual",
@@ -770,7 +770,190 @@ async function getNextAssignSlot(){
 
 async function assignQueueTask(){if(!requireDb()||!selectedQueue)return;const person=assignPerson.value,taskDate=assignDate.value,type=assignType.value,am=assignAM.value||"None",text=assignText.value.trim();if(!text||!person||!taskDate||!type){toast("Thiếu thông tin assign","#b71c1c");return}const sourceId=selectedQueue.source_id;const webMember=memberByName(person),amMember=memberByName(am);const payload={source_id:sourceId,task_date:taskDate,text,person,type,am,done:false,sort_order:999,priority:assignPriority.value,package_name:selectedQueue.package_name||pkgFromId(sourceId),note:assignNote.value||null};let taskId=null;const {data:exist,error:checkErr}=await supabaseClient.from("tasks").select("id").eq("source_id",sourceId).limit(1);if(checkErr){toast("Lỗi check task: "+checkErr.message,"#b71c1c");return}if(exist&&exist.length){taskId=exist[0].id;const {error}=await supabaseClient.from("tasks").update(payload).eq("id",taskId);if(error){toast("Lỗi update task: "+error.message,"#b71c1c");return}}else{const {data,error}=await supabaseClient.from("tasks").insert(payload).select("id").single();if(error){toast("Lỗi insert task: "+error.message,"#b71c1c");return}taskId=data?.id||null}const {error:qErr}=await supabaseClient.from("task_queue").update({queue_status:"ASSIGNED",assigned_person:person,assigned_date:taskDate,priority:assignPriority.value,updated_at:new Date().toISOString()}).eq("source_id",sourceId);if(qErr){toast("Task đã add nhưng lỗi update queue: "+qErr.message,"#b71c1c");return}const msg=`Project: ${text}\nType: ${type}\n\nMember: ${person}\nAM: ${am}\n📅 ${taskDate}`;await sendTelegram({event:"new",person,person_chat_id:webMember?.telegram_chat_id||"",am,am_chat_id:amMember?.telegram_chat_id||"",type,message:msg});await logAction("assign",taskId,sourceId,text,person,`Assigned to ${person} / AM ${am}`,am);closeModal("assignModal");toast("Đã add vào calendar","#2e7d32");const d=new Date(taskDate+"T00:00:00");if(!isNaN(d.getTime()))current=d;await Promise.all([loadQueue(),render()]);showPage("calendar")}
 async function markQueuePending(){if(!requireDb()||!selectedQueue)return;await supabaseClient.from("task_queue").update({queue_status:"PENDING_INFO",updated_at:new Date().toISOString()}).eq("source_id",selectedQueue.source_id);closeModal("assignModal");await loadQueue()}
-function openBulkAutoAssign(){toast("Gợi ý: bấm Assign, hệ thống tự chọn người ít task nhất theo ngày","#f05a28")}
+
+async function assignQueueRowAuto(row){
+  const nextSlot=await getNextAssignSlot();
+
+  const person=nextSlot.person;
+  const taskDate=nextSlot.date;
+  const type=inferType(row);
+  const am=row.am||"None";
+  const text=String(row.project||"").trim();
+  const sourceId=row.source_id;
+
+  if(!text||!person||!taskDate||!type||!sourceId){
+    throw new Error("Thiếu thông tin assign cho "+(row.project||row.source_id||""));
+  }
+
+  const webMember=memberByName(person);
+  const amMember=memberByName(am);
+
+  const payload={
+    source_id:sourceId,
+    task_date:taskDate,
+    text,
+    person,
+    type,
+    am,
+    done:false,
+    sort_order:999,
+    priority:"Normal",
+    package_name:row.package_name||pkgFromId(sourceId),
+    note:row.note||null
+  };
+
+  let taskId=null;
+
+  const {data:exist,error:checkErr}=await supabaseClient
+    .from("tasks")
+    .select("id")
+    .eq("source_id",sourceId)
+    .limit(1);
+
+  if(checkErr)throw new Error("Lỗi check task: "+checkErr.message);
+
+  if(exist&&exist.length){
+    taskId=exist[0].id;
+
+    const {error:updateErr}=await supabaseClient
+      .from("tasks")
+      .update(payload)
+      .eq("id",taskId);
+
+    if(updateErr)throw new Error("Lỗi update task: "+updateErr.message);
+  }else{
+    const {data:inserted,error:insertErr}=await supabaseClient
+      .from("tasks")
+      .insert(payload)
+      .select("id")
+      .single();
+
+    if(insertErr)throw new Error("Lỗi insert task: "+insertErr.message);
+
+    taskId=inserted?.id||null;
+  }
+
+  const {error:qErr}=await supabaseClient
+    .from("task_queue")
+    .update({
+      queue_status:"ASSIGNED",
+      assigned_person:person,
+      assigned_date:taskDate,
+      priority:"Normal",
+      updated_at:new Date().toISOString()
+    })
+    .eq("source_id",sourceId);
+
+  if(qErr)throw new Error("Task đã add nhưng lỗi update queue: "+qErr.message);
+
+  const msg=
+    `Project: ${text}
+`+
+    `Type: ${type}
+
+`+
+    `Member: ${person}
+`+
+    `AM: ${am}
+`+
+    `📅 ${taskDate}`;
+
+  await sendTelegram({
+    event:"new",
+    person,
+    person_chat_id:webMember?.telegram_chat_id||"",
+    am,
+    am_chat_id:amMember?.telegram_chat_id||"",
+    type,
+    message:msg
+  });
+
+  await logAction(
+    "assign_bulk",
+    taskId,
+    sourceId,
+    text,
+    person,
+    `Bulk assigned to ${person} / AM ${am} / Date ${taskDate}`,
+    am
+  );
+
+  return {sourceId,project:text,person,taskDate,type,am};
+}
+
+async function bulkAssignSelected(){
+  if(!requireDb())return;
+
+  const selectedIds=[...document.querySelectorAll(".queue-domain-check:checked")]
+    .map(cb=>cb.value);
+
+  if(!selectedIds.length){
+    toast("Chưa chọn project nào để assign hàng loạt", "#8a6d00");
+    return;
+  }
+
+  let selectedRows=queueRows.filter(r=>selectedIds.includes(r.source_id));
+
+  selectedRows=selectedRows.filter(r=>(r.queue_status||"NEW")==="NEW");
+
+  if(!selectedRows.length){
+    toast("Các project đã chọn không còn trạng thái NEW", "#8a6d00");
+    return;
+  }
+
+  const ok=confirm(
+    `Assign hàng loạt ${selectedRows.length} project?
+
+`+
+    `Hệ thống sẽ tự chọn Date + Person theo Sort ID team như logic assign hiện tại.`
+  );
+
+  if(!ok)return;
+
+  const results=[];
+  const failed=[];
+
+  toast("Đang assign hàng loạt...", "#f05a28");
+
+  for(const row of selectedRows){
+    try{
+      const res=await assignQueueRowAuto(row);
+      results.push(res);
+    }catch(e){
+      console.error("Bulk assign failed", row, e);
+      failed.push({
+        project:row.project||row.source_id,
+        error:e.message||String(e)
+      });
+    }
+  }
+
+  document
+    .querySelectorAll(".queue-domain-check")
+    .forEach(cb=>cb.checked=false);
+
+  await Promise.all([loadQueue(),render()]);
+
+  if(results.length){
+    const lastDate=results[results.length-1].taskDate;
+    const d=new Date(lastDate+"T00:00:00");
+    if(!isNaN(d.getTime()))current=d;
+  }
+
+  if(failed.length){
+    toast(`Assign xong ${results.length}, lỗi ${failed.length}. Xem Console.`, "#b71c1c");
+    console.warn("Bulk assign failed list", failed);
+  }else{
+    toast(`Đã assign hàng loạt ${results.length} project`, "#2e7d32");
+  }
+
+  showPage("calendar");
+}
+
+function openBulkAutoAssign(){
+  bulkAssignSelected();
+}
+
 
 async function loadCalendarTasks(){if(!requireDb())return;const y=current.getFullYear(),m=current.getMonth();const start=formatDate(y,m,1),end=formatDate(y,m,new Date(y,m+1,0).getDate());const {data,error}=await supabaseClient.from("tasks").select("*").gte("task_date",start).lte("task_date",end).order("sort_order",{ascending:true});if(error){toast("Lỗi load calendar: "+error.message,"#b71c1c");return}cache={};(data||[]).forEach(t=>{const d=+String(t.task_date).slice(8,10);(cache[d]??=[]).push(t)});renderQueueKpis()}
 async function render(){await loadCalendarTasks();renderCalendarOnly()}
