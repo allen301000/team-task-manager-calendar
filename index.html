@@ -1,1080 +1,402 @@
 <!doctype html>
 <html lang="vi">
-
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>MAC Web Team Task Manager</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
-    :root {
-      --bg: #f6f6f6;
-      --card: #fff;
-      --text: #222;
-      --muted: #7a7f87;
-      --line: #e7e7e7;
-      --main: #f05a28;
-      --soft: #fff1eb;
-      --green: #34a853;
-      --red: #ef4444;
-      --shadow: 0 10px 30px rgba(20, 20, 20, .055)
-    }
-
-    * {
-      box-sizing: border-box
-    }
-
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif
-    }
-
-    button,
-    input,
-    select,
-    textarea {
-      font: inherit
-    }
-
-    button {
-      border: 0;
-      border-radius: 12px;
-      padding: 8px 12px;
-      cursor: pointer;
-      background: #f1f1f1;
-      color: #222
-    }
-
-    button.primary {
-      background: var(--main);
-      color: #fff
-    }
-
-    button.ghost {
-      background: #fff;
-      border: 1px solid var(--line)
-    }
-
-    button.warn {
-      background: #fff7dc;
-      color: #8a6d00;
-      border: 1px solid #ffe08a
-    }
-
-    button.danger {
-      background: var(--red);
-      color: #fff
-    }
-
-    input,
-    select,
-    textarea {
-      width: 100%;
-      padding: 9px 11px;
-      border: 1px solid #ddd;
-      border-radius: 12px;
-      background: #fff;
-      color: #222;
-      outline: none
-    }
-
-    input:focus,
-    select:focus,
-    textarea:focus {
-      border-color: var(--main);
-      box-shadow: 0 0 0 3px rgba(240, 90, 40, .12)
-    }
-
-    textarea {
-      min-height: 80px
-    }
-
-    .app {
-      display: grid;
-      grid-template-columns: 250px 1fr;
-      min-height: 100vh
-    }
-
-    aside {
-      background: #fff;
-      border-right: 1px solid var(--line);
-      padding: 20px;
-      box-shadow: var(--shadow)
-    }
-
-    .brand {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      margin-bottom: 20px
-    }
-
-    .logo {
-      width: 54px;
-      height: 54px;
-      border: 1px solid #eee;
-      border-radius: 14px;
-      display: grid;
-      place-items: center;
-      font-weight: 900
-    }
-
-    .logo span {
-      color: var(--main)
-    }
-
-    h1 {
-      font-size: 18px;
-      margin: 0
-    }
-
-    .brand p {
-      margin: 2px 0 0;
-      color: var(--main);
-      font-size: 11px;
-      font-weight: 700
-    }
-
-    .nav button {
-      display: block;
-      width: 100%;
-      text-align: left;
-      margin-bottom: 8px;
-      background: transparent;
-      font-weight: 650
-    }
-
-    .nav button.active {
-      background: var(--soft);
-      color: var(--main);
-      border: 1px solid #ffc7b3
-    }
-
-    .side {
-      margin-top: 16px;
-      padding: 14px;
-      background: #fafafa;
-      border: 1px solid var(--line);
-      border-radius: 16px
-    }
-
-    .side p {
-      font-size: 12px;
-      color: var(--muted);
-      line-height: 1.45
-    }
-
-    main {
-      padding: 20px;
-      min-width: 0
-    }
-
-    .top {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      align-items: center;
-      margin-bottom: 18px;
-      background: #fff;
-      padding: 16px 18px;
-      border-radius: 18px;
-      box-shadow: var(--shadow)
-    }
-
-    .top h2 {
-      margin: 0;
-      font-size: 22px
-    }
-
-    .sub {
-      font-size: 12px;
-      color: var(--muted);
-      margin-top: 3px
-    }
-
-    .tools {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center
-    }
-
-    .grid {
-      display: grid;
-      gap: 12px
-    }
-
-    .four {
-      grid-template-columns: repeat(4, 1fr)
-    }
-
-    .two {
-      grid-template-columns: repeat(2, 1fr)
-    }
-
-    .three {
-      grid-template-columns: repeat(3, 1fr)
-    }
-
-    .card {
-      background: #fff;
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      padding: 16px;
-      box-shadow: var(--shadow)
-    }
-
-    .kpi .label {
-      font-size: 12px;
-      color: var(--muted)
-    }
-
-    .kpi .value {
-      font-size: 28px;
-      font-weight: 800;
-      display: block
-    }
-
-    .badge {
-      display: inline-flex;
-      border-radius: 999px;
-      padding: 3px 8px;
-      font-size: 11px;
-      border: 1px solid #e5e7eb;
-      background: #f3f4f6;
-      white-space: nowrap
-    }
-
-    .new {
-      background: var(--soft);
-      color: var(--main);
-      border-color: #ffc7b3
-    }
-
-    .assigned {
-      background: #e8f7ee;
-      color: #1e7d3c;
-      border-color: #bae7c8
-    }
-
-    .pending {
-      background: #fff7dc;
-      color: #8a6d00;
-      border-color: #ffe08a
-    }
-
-    .urgent {
-      background: #fee2e2;
-      color: #b91c1c;
-      border-color: #fecaca
-    }
-
-    .wrap {
-      overflow: auto;
-      border: 1px solid var(--line);
-      border-radius: 16px
-    }
-
-    table {
-      width: 100%;
-      min-width: 900px;
-      border-collapse: collapse;
-      font-size: 12px;
-      background: #fff
-    }
-
-    th,
-    td {
-      padding: 9px 10px;
-      border-bottom: 1px solid var(--line);
-      text-align: left;
-      vertical-align: top
-    }
-
-    th {
-      position: sticky;
-      top: 0;
-      background: #fff6f2;
-      border-bottom: 1px solid #ffc7b3;
-      z-index: 1
-    }
-
-    .muted {
-      color: var(--muted)
-    }
-
-    .hidden {
-      display: none !important
-    }
-
-    .week,
-    .cal {
-      display: grid;
-      grid-template-columns: repeat(7, 1fr)
-    }
-
-    .week div {
-      text-align: center;
-      padding: 9px;
-      background: #fff6f2;
-      border: 1px solid #f1e1d9;
-      color: #6b7280;
-      font-size: 12px;
-      font-weight: 700
-    }
-
-    .day {
-      min-height: 130px;
-      background: #fff;
-      border: 1px solid #ececec;
-      padding: 7px
-    }
-
-    .today {
-      box-shadow: inset 0 0 0 2px var(--main);
-      background: #fffaf7
-    }
-
-    .dayno {
-      display: flex;
-      justify-content: space-between;
-      color: var(--muted);
-      font-size: 12px;
-      margin-bottom: 5px
-    }
-
-    .task {
-      position: relative;
-      margin-bottom: 5px;
-      padding: 7px;
-      border-radius: 8px;
-      color: #000;
-      cursor: grab
-    }
-
-    .task.done {
-      opacity: .45;
-      filter: grayscale(.15)
-    }
-
-    .task.done .tt {
-      text-decoration: line-through
-    }
-
-    .tt {
-      font-weight: 800;
-      font-size: 12px;
-      line-height: 1.2;
-      padding-right: 48px
-    }
-
-    .tm {
-      font-size: 10px;
-      opacity: .75;
-      margin-top: 4px
-    }
-
-    .act {
-      display: none;
-      gap: 4px;
-      position: absolute;
-      right: 4px;
-      bottom: 4px
-    }
-
-    .task:hover .act {
-      display: flex
-    }
-
-    .mini {
-      padding: 2px 5px;
-      border-radius: 6px;
-      background: rgba(0, 0, 0, .22);
-      color: #fff;
-      font-size: 10px
-    }
-
-    .add {
-      color: var(--muted);
-      font-size: 11px;
-      cursor: pointer
-    }
-
-    .modal {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, .72);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 16px;
-      z-index: 99
-    }
-
-    .modal.open {
-      display: flex
-    }
-
-    .box {
-      width: min(620px, 100%);
-      background: #fff;
-      border-radius: 20px;
-      padding: 18px
-    }
-
-    .form {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 10px
-    }
-
-    .field label {
-      display: block;
-      font-size: 12px;
-      color: var(--muted);
-      margin-bottom: 4px
-    }
-
-    .actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-      margin-top: 14px
-    }
-
-    .toast {
-      position: fixed;
-      bottom: 18px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #333;
-      color: #fff;
-      padding: 9px 14px;
-      border-radius: 12px;
-      font-size: 13px;
-      opacity: 0;
-      transition: .25s;
-      z-index: 120
-    }
-
-    .toast.show {
-      opacity: 1
-    }
-
-    .log {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
-      background: #111827;
-      color: #e5e7eb;
-      border-radius: 14px;
-      padding: 12px;
-      min-height: 120px;
-      max-height: 260px;
-      overflow: auto;
-      white-space: pre-wrap
-    }
-
-    .note {
-      padding: 10px 12px;
-      background: #fffaf7;
-      border: 1px dashed #ffc7b3;
-      border-radius: 12px;
-      color: #5f514b;
-      font-size: 13px;
-      line-height: 1.45
-    }
-
-    @media(max-width:1000px) {
-      .app {
-        grid-template-columns: 1fr
-      }
-
-      .four,
-      .two,
-      .three {
-        grid-template-columns: 1fr
-      }
-
-      .week {
-        display: none
-      }
-
-      .cal {
-        grid-template-columns: 1fr
-      }
-
-      .top {
-        flex-direction: column;
-        align-items: flex-start
-      }
-    }
+    :root{
+      --bg:#f6f6f6; --card:#fff; --text:#222; --muted:#7a7f87; --line:#e7e7e7;
+      --main:#f05a28; --soft:#fff1eb; --green:#34a853; --red:#ef4444;
+      --shadow:0 10px 30px rgba(20,20,20,.055)
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    button,input,select,textarea{font:inherit}
+    button{border:0;border-radius:12px;padding:8px 12px;cursor:pointer;background:#f1f1f1;color:#222}
+    button.primary{background:var(--main);color:#fff}
+    button.ghost{background:#fff;border:1px solid var(--line)}
+    button.warn{background:#fff7dc;color:#8a6d00;border:1px solid #ffe08a}
+    button.danger{background:var(--red);color:#fff}
+    button.green{background:var(--green);color:#fff}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    input,select,textarea{width:100%;padding:9px 11px;border:1px solid #ddd;border-radius:12px;background:#fff;color:#222;outline:none}
+    input:focus,select:focus,textarea:focus{border-color:var(--main);box-shadow:0 0 0 3px rgba(240,90,40,.12)}
+    textarea{min-height:80px}
+    .app{display:grid;grid-template-columns:250px 1fr;min-height:100vh}
+    aside{background:#fff;border-right:1px solid var(--line);padding:20px;box-shadow:var(--shadow);position:sticky;top:0;height:100vh;overflow:auto}
+    .brand{display:flex;gap:12px;align-items:center;margin-bottom:20px}
+    .logo{width:54px;height:54px;border:1px solid #eee;border-radius:14px;display:grid;place-items:center;font-weight:900}
+    .logo span{color:var(--main)}
+    h1{font-size:18px;margin:0}
+    .brand p{margin:2px 0 0;color:var(--main);font-size:11px;font-weight:700}
+    .nav button{display:block;width:100%;text-align:left;margin-bottom:8px;background:transparent;font-weight:650}
+    .nav button.active{background:var(--soft);color:var(--main);border:1px solid #ffc7b3}
+    .side{margin-top:16px;padding:14px;background:#fafafa;border:1px solid var(--line);border-radius:16px}
+    .side p{font-size:12px;color:var(--muted);line-height:1.45}
+    main{padding:20px;min-width:0}
+    .top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:18px;background:#fff;padding:16px 18px;border-radius:18px;box-shadow:var(--shadow)}
+    .top h2{margin:0;font-size:22px}
+    .sub{font-size:12px;color:var(--muted);margin-top:3px}
+    .tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    .grid{display:grid;gap:12px}
+    .four{grid-template-columns:repeat(4,1fr)}
+    .three{grid-template-columns:repeat(3,1fr)}
+    .two{grid-template-columns:repeat(2,1fr)}
+    .card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:var(--shadow)}
+    .kpi .label{font-size:12px;color:var(--muted)}
+    .kpi .value{font-size:28px;font-weight:800;display:block}
+    .badge{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:11px;border:1px solid #e5e7eb;background:#f3f4f6;white-space:nowrap}
+    .new{background:var(--soft);color:var(--main);border-color:#ffc7b3}
+    .assigned{background:#e8f7ee;color:#1e7d3c;border-color:#bae7c8}
+    .pending{background:#fff7dc;color:#8a6d00;border-color:#ffe08a}
+    .urgent{background:#fee2e2;color:#b91c1c;border-color:#fecaca}
+    .wrap{overflow:auto;border:1px solid var(--line);border-radius:16px}
+    table{width:100%;min-width:900px;border-collapse:collapse;font-size:12px;background:#fff}
+    th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+    th{position:sticky;top:0;background:#fff6f2;border-bottom:1px solid #ffc7b3;z-index:1}
+    a{color:var(--main);text-decoration:none}
+    .muted{color:var(--muted)}
+    .hidden{display:none!important}
+    .week,.cal{display:grid;grid-template-columns:repeat(7,1fr)}
+    .week div{text-align:center;padding:9px;background:#fff6f2;border:1px solid #f1e1d9;color:#6b7280;font-size:12px;font-weight:700}
+    .day{min-height:130px;background:#fff;border:1px solid #ececec;padding:7px}
+    .today{box-shadow:inset 0 0 0 2px var(--main);background:#fffaf7}
+    .dayno{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin-bottom:5px}
+    .task{position:relative;margin-bottom:5px;padding:7px;border-radius:8px;color:#000;cursor:grab}
+    .task.done{opacity:.45;filter:grayscale(.15)}
+    .task.done .tt{text-decoration:line-through}
+    .tt{font-weight:800;font-size:12px;line-height:1.2;padding-right:48px}
+    .tm{font-size:10px;opacity:.75;margin-top:4px}
+    .act{display:none;gap:4px;position:absolute;right:4px;bottom:4px}
+    .task:hover .act{display:flex}
+    .mini{padding:2px 5px;border-radius:6px;background:rgba(0,0,0,.22);color:#fff;font-size:10px}
+    .add{color:var(--muted);font-size:11px;cursor:pointer}
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;padding:16px;z-index:99}
+    .modal.open{display:flex}
+    .box{width:min(720px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:20px;padding:18px}
+    .form{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+    .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+    .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+    .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:9px 14px;border-radius:12px;font-size:13px;opacity:0;transition:.25s;z-index:120}
+    .toast.show{opacity:1}
+    .log{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;background:#111827;color:#e5e7eb;border-radius:14px;padding:12px;min-height:120px;max-height:260px;overflow:auto;white-space:pre-wrap}
+    .note{padding:10px 12px;background:#fffaf7;border:1px dashed #ffc7b3;border-radius:12px;color:#5f514b;font-size:13px;line-height:1.45}
+    @media(max-width:1000px){.app{grid-template-columns:1fr} aside{position:relative;height:auto}.four,.two,.three{grid-template-columns:1fr}.week{display:none}.cal{grid-template-columns:1fr}.top{flex-direction:column;align-items:flex-start}.form{grid-template-columns:1fr}}
   </style>
 </head>
 
 <body>
-  <div class="app">
-    <aside>
-      <div class="brand">
-        <div class="logo"><span>M</span>AC</div>
-        <div>
-          <h1>Task Manager</h1>
-          <p>Web setup team calendar</p>
+<div class="app">
+  <aside>
+    <div class="brand">
+      <div class="logo"><span>M</span>AC</div>
+      <div><h1>Task Manager</h1><p>Web setup team calendar</p></div>
+    </div>
+
+    <div class="nav">
+      <button class="active" data-page="queue">📥 Task Queue</button>
+      <button data-page="calendar">📅 Calendar</button>
+      <button data-page="workload">👥 Workload</button>
+      <button data-page="report">📊 Report</button>
+      <button data-page="members">👤 Members / AM</button>
+      <button data-page="logs">🧾 Audit Logs</button>
+      <button data-page="setup">⚙️ Setup</button>
+    </div>
+
+    <div class="side">
+      <b>Quy trình</b>
+      <p>Sheet nguồn → Queue → Assign người/ngày → Supabase tasks → Calendar realtime → Telegram.</p>
+    </div>
+
+    <div class="side">
+      <b>Edit mode</b>
+      <input id="editCode" placeholder="Edit code" style="margin:8px 0">
+      <button class="primary" style="width:100%" onclick="unlockEdit()">Unlock</button>
+      <p id="editState"></p>
+    </div>
+  </aside>
+
+  <main>
+    <section id="page-queue">
+      <div class="top">
+        <div><h2>📥 Task Queue</h2><div class="sub">Task mới từ Google Sheet, lọc theo rule và phân vào calendar.</div></div>
+        <div class="tools">
+          <button class="primary" onclick="syncQueueFromApi()">Sync từ Sheet API</button>
+          <button onclick="loadQueue()">Reload Queue</button>
+          <button onclick="openBulkAutoAssign()">Auto suggest</button>
         </div>
       </div>
-      <div class="nav"><button class="active" data-page="queue">📥 Task Queue</button><button data-page="calendar">📅
-          Calendar</button><button data-page="workload">👥 Workload</button><button data-page="report">📊
-          Report</button><button data-page="setup">⚙️ Setup</button></div>
-      <div class="side"><b>Quy trình</b>
-        <p>Sheet nguồn → Queue → Assign người/ngày → Supabase tasks → Calendar realtime → Telegram.</p>
+
+      <div class="grid four" style="margin-bottom:12px">
+        <div class="card kpi"><span class="label">Tiệm mới đủ info</span><span class="value" id="kpiCurrent">0</span></div>
+        <div class="card kpi"><span class="label">Queue mới</span><span class="value" id="kpiNew">0</span></div>
+        <div class="card kpi"><span class="label">Đã assign</span><span class="value" id="kpiAssigned">0</span></div>
+        <div class="card kpi"><span class="label">Task hôm nay</span><span class="value" id="kpiToday">0</span></div>
       </div>
-      <div class="side"><b>Edit mode</b><input id="editCode" placeholder="Edit code" style="margin:8px 0"><button
-          class="primary" style="width:100%" onclick="unlockEdit()">Unlock</button>
-        <p id="editState"></p>
-      </div>
-    </aside>
-    <main>
-      <section id="page-queue">
-        <div class="top">
-          <div>
-            <h2>📥 Task Queue</h2>
-            <div class="sub">Task mới từ Google Sheet, lọc theo rule và phân vào calendar.</div>
-          </div>
-          <div class="tools"><button class="primary" onclick="syncQueueFromApi()">Sync từ Sheet API</button><button
-              onclick="loadQueue()">Reload Queue</button><button onclick="openBulkAutoAssign()">Auto suggest</button>
-          </div>
+
+      <div class="card">
+        <div class="tools" style="margin-bottom:10px">
+          <select id="queueStatusFilter" onchange="renderQueue()">
+            <option value="CURRENT">Tiệm mới đủ info</option>
+            <option value="NEW">Chưa assign</option>
+            <option value="ALL">Tất cả</option>
+            <option value="ASSIGNED">Đã assign</option>
+            <option value="PENDING_INFO">Pending info</option>
+            <option value="SKIPPED">Skipped</option>
+          </select>
+          <select id="queuePackageFilter" onchange="renderQueue()"><option value="">Tất cả gói</option></select>
+          <input id="queueSearch" placeholder="Tìm project / AM / source id..." oninput="renderQueue()" style="max-width:340px">
         </div>
-        <div class="grid four" style="margin-bottom:12px">
-          <div class="card kpi"><span class="label">Tiệm mới đủ info</span><span class="value" id="kpiCurrent">0</span></div>
-          <div class="card kpi"><span class="label">Đã assign</span><span class="value" id="kpiAssigned">0</span></div>
-          <div class="card kpi"><span class="label">Pending info</span><span class="value" id="kpiPending">0</span>
-          </div>
-          <div class="card kpi"><span class="label">Task hôm nay</span><span class="value" id="kpiToday">0</span></div>
+
+        <div class="wrap">
+          <table>
+            <thead><tr><th>Source ID</th><th>Project</th><th>AM</th><th>Start</th><th>Expired</th><th>Gói</th><th>Template</th><th>Layout</th><th>Status</th><th>Action</th></tr></thead>
+            <tbody id="queueBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <h3>Debug log nhanh</h3>
+        <div class="note" style="margin-bottom:10px">Khi lỗi sync, mở F12 → Console để xem chi tiết. Box này ghi log chính.</div>
+        <div id="debugBox" class="log">Ready.</div>
+      </div>
+    </section>
+
+    <section id="page-calendar" class="hidden">
+      <div class="top">
+        <div><h2>📅 Calendar</h2><div class="sub">Kéo thả task, mark done, edit, delete.</div></div>
+        <div class="tools">
+          <select id="filterPerson" onchange="renderCalendarOnly()"><option value="">All people</option></select>
+          <select id="viewMode" onchange="renderCalendarOnly()"><option value="assign">View by assign order</option><option value="normal">Normal view</option></select>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="tools" style="justify-content:space-between;margin-bottom:10px">
+          <button onclick="changeMonth(-1)">←</button><h3 id="calendarTitle"></h3><button onclick="changeMonth(1)">→</button>
+        </div>
+        <div class="week"><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div><div>Sun</div></div>
+        <div id="calendar" class="cal"></div>
+      </div>
+    </section>
+
+    <section id="page-workload" class="hidden">
+      <div class="top">
+        <div><h2>👥 Workload</h2><div class="sub">Theo dõi số task/người.</div></div>
+        <div class="tools"><input type="date" id="workloadDate" onchange="renderWorkload()" style="width:auto"><button onclick="renderWorkload()">Refresh</button></div>
+      </div>
+      <div class="grid two">
+        <div class="card"><h3>Workload theo ngày</h3><div class="wrap"><table style="min-width:520px"><thead><tr><th>Member</th><th>Task</th><th>Point</th><th>Gợi ý</th></tr></thead><tbody id="workloadDayBody"></tbody></table></div></div>
+        <div class="card"><h3>Workload tháng</h3><div class="wrap"><table style="min-width:520px"><thead><tr><th>Member</th><th>Total</th><th>Done</th><th>Pending</th></tr></thead><tbody id="workloadMonthBody"></tbody></table></div></div>
+      </div>
+    </section>
+
+    <section id="page-report" class="hidden">
+      <div class="top"><div><h2>📊 Report</h2><div class="sub">Số liệu nhanh trong tháng.</div></div><button onclick="renderReport()">Refresh</button></div>
+      <div class="grid three" style="margin-bottom:12px">
+        <div class="card kpi"><span class="label">Total</span><span class="value" id="reportTotal">0</span></div>
+        <div class="card kpi"><span class="label">Done</span><span class="value" id="reportDone">0</span></div>
+        <div class="card kpi"><span class="label">Pending</span><span class="value" id="reportPending">0</span></div>
+      </div>
+      <div class="grid two">
+        <div class="card"><h3>Theo type</h3><div id="reportByType"></div></div>
+        <div class="card"><h3>Theo member</h3><div id="reportByPerson"></div></div>
+      </div>
+    </section>
+
+    <section id="page-members" class="hidden">
+      <div class="top">
+        <div><h2>👤 Members / AM</h2><div class="sub">Quản lý người làm web, AM và Telegram ID ngay trong Task Manager.</div></div>
+        <div class="tools"><button class="primary" onclick="openMemberModal()">+ Add member/AM</button><button onclick="loadMembers()">Reload</button></div>
+      </div>
+      <div class="card">
+        <div class="wrap">
+          <table>
+            <thead><tr><th>Name</th><th>Role</th><th>Telegram Chat ID</th><th>Max/day</th><th>Active</th><th>Color</th><th>Action</th></tr></thead>
+            <tbody id="membersBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="page-logs" class="hidden">
+      <div class="top"><div><h2>🧾 Audit Logs</h2><div class="sub">Theo dõi assign, unassign, delete, move, done.</div></div><button onclick="loadAuditLogs()">Reload</button></div>
+      <div class="card"><div class="wrap"><table><thead><tr><th>Time</th><th>Action</th><th>Project</th><th>Person</th><th>AM</th><th>Detail</th></tr></thead><tbody id="logsBody"></tbody></table></div></div>
+    </section>
+
+    <section id="page-setup" class="hidden">
+      <div class="top"><div><h2>⚙️ Setup</h2><div class="sub">Cấu hình Supabase, Apps Script API và Telegram webhook.</div></div><button class="primary" onclick="saveSettings()">Save settings</button></div>
+      <div class="grid two">
+        <div class="card">
+          <h3>Supabase</h3>
+          <label>Supabase URL</label><input id="setSupabaseUrl" placeholder="https://xxx.supabase.co"><br><br>
+          <label>Supabase anon / publishable key</label><input id="setSupabaseKey" placeholder="sb_publishable... hoặc anon key"><br><br>
+          <div class="note">Không đưa service role key lên GitHub Pages.</div>
         </div>
         <div class="card">
-          <div class="tools" style="margin-bottom:10px"><select id="queueStatusFilter" onchange="renderQueue()">
-              <option value="CURRENT">Tiệm mới đủ info</option>
-              <option value="NEW">Chưa assign</option>
-              <option value="ALL">Tất cả</option>
-              <option value="ASSIGNED">Đã assign</option>
-              <option value="PENDING_INFO">Pending info</option>
-              <option value="SKIPPED">Skipped</option>
-              <option value="STALE">Không còn trong filter</option>
-            </select><select id="queuePackageFilter" onchange="renderQueue()">
-              <option value="">Tất cả gói</option>
-            </select><input id="queueSearch" placeholder="Tìm project / AM / source id..." oninput="renderQueue()"
-              style="max-width:340px"></div>
-          <div class="wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Source ID</th>
-                  <th>Project</th>
-                  <th>AM</th>
-                  <th>Start</th>
-                  <th>Expired</th>
-                  <th>Gói</th>
-                  <th>Template</th>
-                  <th>Layout</th>
-                  <th>Status</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody id="queueBody"></tbody>
-            </table>
-          </div>
+          <h3>Apps Script</h3>
+          <label>Apps Script Web App URL để lấy task queue</label><input id="setSheetApi" placeholder="https://script.google.com/macros/s/.../exec"><br><br>
+          <label>Telegram webhook URL</label><input id="setTelegram" placeholder="https://script.google.com/macros/s/.../exec"><br><br>
+          <div class="note">Có thể dùng chung Apps Script URL nếu file GAS có cả doGet queue API và doPost Telegram.</div>
         </div>
-        <div class="card" style="margin-top:12px">
-          <h3>Debug log nhanh</h3>
-          <div class="note" style="margin-bottom:10px">Khi lỗi sync, mở F12 → Console để xem chi tiết. Box này ghi log
-            chính.</div>
-          <div id="debugBox" class="log">Ready.</div>
-        </div>
-      </section>
-      <section id="page-calendar" class="hidden">
-        <div class="top">
-          <div>
-            <h2>📅 Calendar</h2>
-            <div class="sub">Kéo thả task, mark done, edit, delete.</div>
-          </div>
-          <div class="tools"><select id="filterPerson" onchange="renderCalendarOnly()">
-              <option value="">All people</option>
-            </select><select id="viewMode" onchange="renderCalendarOnly()">
-              <option value="assign">View by assign order</option>
-              <option value="normal">Normal view</option>
-            </select></div>
-        </div>
-        <div class="card">
-          <div class="tools" style="justify-content:space-between;margin-bottom:10px"><button
-              onclick="changeMonth(-1)">←</button>
-            <h3 id="calendarTitle"></h3><button onclick="changeMonth(1)">→</button>
-          </div>
-          <div class="week">
-            <div>Mon</div>
-            <div>Tue</div>
-            <div>Wed</div>
-            <div>Thu</div>
-            <div>Fri</div>
-            <div>Sat</div>
-            <div>Sun</div>
-          </div>
-          <div id="calendar" class="cal"></div>
-        </div>
-      </section>
-      <section id="page-workload" class="hidden">
-        <div class="top">
-          <div>
-            <h2>👥 Workload</h2>
-            <div class="sub">Theo dõi số task/người.</div>
-          </div>
-          <div class="tools"><input type="date" id="workloadDate" onchange="renderWorkload()" style="width:auto"><button
-              onclick="renderWorkload()">Refresh</button></div>
-        </div>
-        <div class="grid two">
-          <div class="card">
-            <h3>Workload theo ngày</h3>
-            <div class="wrap">
-              <table style="min-width:520px">
-                <thead>
-                  <tr>
-                    <th>Member</th>
-                    <th>Task</th>
-                    <th>Point</th>
-                    <th>Gợi ý</th>
-                  </tr>
-                </thead>
-                <tbody id="workloadDayBody"></tbody>
-              </table>
-            </div>
-          </div>
-          <div class="card">
-            <h3>Workload tháng</h3>
-            <div class="wrap">
-              <table style="min-width:520px">
-                <thead>
-                  <tr>
-                    <th>Member</th>
-                    <th>Total</th>
-                    <th>Done</th>
-                    <th>Pending</th>
-                  </tr>
-                </thead>
-                <tbody id="workloadMonthBody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </section>
-      <section id="page-report" class="hidden">
-        <div class="top">
-          <div>
-            <h2>📊 Report</h2>
-            <div class="sub">Số liệu nhanh trong tháng.</div>
-          </div><button onclick="renderReport()">Refresh</button>
-        </div>
-        <div class="grid three" style="margin-bottom:12px">
-          <div class="card kpi"><span class="label">Total</span><span class="value" id="reportTotal">0</span></div>
-          <div class="card kpi"><span class="label">Done</span><span class="value" id="reportDone">0</span></div>
-          <div class="card kpi"><span class="label">Pending</span><span class="value" id="reportPending">0</span></div>
-        </div>
-        <div class="grid two">
-          <div class="card">
-            <h3>Theo type</h3>
-            <div id="reportByType"></div>
-          </div>
-          <div class="card">
-            <h3>Theo member</h3>
-            <div id="reportByPerson"></div>
-          </div>
-        </div>
-      </section>
-      <section id="page-setup" class="hidden">
-        <div class="top">
-          <div>
-            <h2>⚙️ Setup</h2>
-            <div class="sub">Cấu hình Supabase, Apps Script API và Telegram webhook.</div>
-          </div><button class="primary" onclick="saveSettings()">Save settings</button>
-        </div>
-        <div class="grid two">
-          <div class="card">
-            <h3>Supabase</h3><label>Supabase URL</label><input id="setSupabaseUrl"
-              placeholder="https://xxx.supabase.co"><br><br><label>Supabase anon / publishable key</label><input
-              id="setSupabaseKey" placeholder="sb_publishable... hoặc anon key"><br><br>
-            <div class="note">Không đưa service role key lên GitHub Pages.</div>
-          </div>
-          <div class="card">
-            <h3>Google Sheet API / Telegram</h3><label>Apps Script Web App URL để lấy task queue</label><input
-              id="setSheetApi" placeholder="https://script.google.com/macros/s/.../exec"><br><br><label>Telegram webhook
-              URL</label><input id="setTelegram" placeholder="https://script.google.com/macros/s/.../exec"><br><br>
-            <div class="note">Apps Script cần hỗ trợ JSONP: ?action=queue&callback=...</div>
-          </div>
-        </div>
-        <div class="grid two" style="margin-top:12px">
-          <div class="card">
-            <h3>Quản lý người làm web</h3>
-            <div class="note" style="margin-bottom:10px">Mỗi dòng là 1 member. Dropdown Person trong Assign/Calendar sẽ lấy từ danh sách này.</div>
-            <textarea id="setPeopleList" style="height:180px"></textarea>
-          </div>
-          <div class="card">
-            <h3>Quản lý AM</h3>
-            <div class="note" style="margin-bottom:10px">Mỗi dòng là 1 AM. Khi assign, AM mặc định theo Sheet nhưng vẫn có thể chọn AM khác.</div>
-            <textarea id="setAmList" style="height:180px"></textarea>
-          </div>
-        </div>
-        <div class="card" style="margin-top:12px">
-          <h3>SQL Supabase cần có</h3><textarea readonly style="height:350px">create extension if not exists pgcrypto;
-
-alter table public.tasks add column if not exists source_id text;
-alter table public.tasks add column if not exists priority text default 'Normal';
-alter table public.tasks add column if not exists package_name text;
-alter table public.tasks add column if not exists note text;
-alter table public.tasks add column if not exists created_at timestamptz default now();
-alter table public.tasks add column if not exists updated_at timestamptz default now();
-
-create unique index if not exists tasks_source_id_unique on public.tasks(source_id) where source_id is not null;
-
-create table if not exists public.task_queue (
-  id uuid primary key default gen_random_uuid(),
-  source_id text not null unique,
-  project text not null,
-  am text,
-  start_date date,
-  expired_date date,
-  template_url text,
-  layout_url text,
-  package_name text,
-  source_status text,
-  queue_status text not null default 'NEW',
-  assigned_task_id uuid,
-  assigned_person text,
-  assigned_date date,
-  priority text default 'Normal',
-  note text,
-  source_row text,
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
-);
-
-create index if not exists task_queue_status_idx on public.task_queue(queue_status);
-create index if not exists task_queue_assigned_date_idx on public.task_queue(assigned_date);
-alter table public.task_queue add column if not exists is_current boolean default false;
-alter table public.task_queue add column if not exists last_seen_at timestamptz;
-
-create index if not exists task_queue_is_current_idx on public.task_queue(is_current);
-create index if not exists task_queue_last_seen_at_idx on public.task_queue(last_seen_at);
-create index if not exists tasks_task_date_idx on public.tasks(task_date);</textarea>
-        </div>
-      </section>
-    </main>
-  </div>
-  <div class="modal" id="assignModal" onclick="closeModalOnBg(event,'assignModal')">
-    <div class="box">
-      <h3 id="assignTitle">Assign task</h3>
-      <div class="form">
-        <div class="field"><label>Task name</label><input id="assignText"></div>
-        <div class="field"><label>Person</label><select id="assignPerson"></select></div>
-        <div class="field"><label>Task date</label><input type="date" id="assignDate"></div>
-        <div class="field"><label>Type</label><select id="assignType"></select></div>
-        <div class="field"><label>AM</label><select id="assignAM"></select></div>
-        <div class="field"><label>Priority</label><select id="assignPriority">
-            <option>Normal</option>
-            <option>High</option>
-            <option>Urgent</option>
-            <option>Low</option>
-          </select></div>
-        <div class="field" style="grid-column:1/-1"><label>Note</label><textarea id="assignNote"></textarea></div>
       </div>
-      <div class="actions"><button class="ghost" onclick="closeModal('assignModal')">Cancel</button><button class="warn"
-          onclick="markQueuePending()">Pending info</button><button class="primary" onclick="assignQueueTask()">Add to
-          Calendar</button></div>
+    </section>
+  </main>
+</div>
+
+<div class="modal" id="assignModal" onclick="closeModalOnBg(event,'assignModal')">
+  <div class="box">
+    <h3 id="assignTitle">Assign task</h3>
+    <div class="form">
+      <div class="field"><label>Task name</label><input id="assignText"></div>
+      <div class="field"><label>Person</label><select id="assignPerson"></select></div>
+      <div class="field"><label>Task date</label><input type="date" id="assignDate"></div>
+      <div class="field"><label>Type</label><select id="assignType"></select></div>
+      <div class="field"><label>AM</label><select id="assignAM"></select></div>
+      <div class="field"><label>Priority</label><select id="assignPriority"><option>Normal</option><option>High</option><option>Urgent</option><option>Low</option></select></div>
+      <div class="field" style="grid-column:1/-1"><label>Note</label><textarea id="assignNote"></textarea></div>
     </div>
+    <div class="actions"><button class="ghost" onclick="closeModal('assignModal')">Cancel</button><button class="warn" onclick="markQueuePending()">Pending info</button><button class="primary" onclick="assignQueueTask()">Add to Calendar</button></div>
   </div>
-  <div class="modal" id="taskModal" onclick="closeModalOnBg(event,'taskModal')">
-    <div class="box">
-      <h3 id="taskModalTitle">Task</h3>
-      <div class="form">
-        <div class="field" style="grid-column:1/-1"><label>Task name</label><input id="taskText"></div>
-        <div class="field"><label>Person</label><select id="taskPerson"></select></div>
-        <div class="field"><label>Type</label><select id="taskType"></select></div>
-        <div class="field"><label>AM</label><select id="taskAM"></select></div>
-        <div class="field"><label>Priority</label><select id="taskPriority">
-            <option>Normal</option>
-            <option>High</option>
-            <option>Urgent</option>
-            <option>Low</option>
-          </select></div>
-        <div class="field" style="grid-column:1/-1"><label>Note</label><textarea id="taskNote"></textarea></div>
-      </div>
-      <div class="actions"><button class="ghost" onclick="closeModal('taskModal')">Cancel</button><button
-          class="primary" onclick="saveTaskFromModal()">Save</button></div>
+</div>
+
+<div class="modal" id="taskModal" onclick="closeModalOnBg(event,'taskModal')">
+  <div class="box">
+    <h3 id="taskModalTitle">Task</h3>
+    <div class="form">
+      <div class="field" style="grid-column:1/-1"><label>Task name</label><input id="taskText"></div>
+      <div class="field"><label>Person</label><select id="taskPerson"></select></div>
+      <div class="field"><label>Type</label><select id="taskType"></select></div>
+      <div class="field"><label>AM</label><select id="taskAM"></select></div>
+      <div class="field"><label>Priority</label><select id="taskPriority"><option>Normal</option><option>High</option><option>Urgent</option><option>Low</option></select></div>
+      <div class="field" style="grid-column:1/-1"><label>Note</label><textarea id="taskNote"></textarea></div>
     </div>
+    <div class="actions"><button class="ghost" onclick="closeModal('taskModal')">Cancel</button><button class="primary" onclick="saveTaskFromModal()">Save</button></div>
   </div>
-  <div id="toast" class="toast"></div>
-  <script>
-    const DEFAULTS = {
-      editCode: "TEAM2026",
-      supabaseUrl: "",
-      supabaseKey: "",
-      sheetApi: "",
-      telegramWebhook: "",
-      peopleList: ["Tony", "Alex", "Lucas", "Allen", "Hayden", "Leo", "Dante"],
-      amList: ["None", "Luna", "Nancy", "Sarah", "Issac", "Elysia", "Jennie", "Zoe", "Wendy", "Bruce", "Sofia", "Selena", "Lucie", "Anna", "Josie", "Tera", "Hanie", "Emma", "Mia", "Rosie", "Helen", "Alan Bui", "Julie", "Rachel Hoang", "Joy", "Oli Nguyen", "Rosabella", "Allen AM"]
-    };
-    const DEFAULT_COLORS = ["#ff8a80", "#ffe082", "#b0bec5", "#90caf9", "#f48fb1", "#ce93d8", "#a5d6a7", "#ffcc80", "#80cbc4", "#c5e1a5", "#ef9a9a", "#9fa8da"];
-    const TYPES = ["Design + QR", "Design", "Menu + QR", "Menu", "QR"];
-    const PACKAGE_POINTS = { "Gói S": 1, "Gói P": 1, "Gói G": 1.2, "Gói F": 1.2, "Gói Menu + QR": 1.5, "Gói Custom": 2 };
-    let settings = { ...DEFAULTS, ...JSON.parse(localStorage.getItem("tm_settings") || "{}") };
-    let supabaseClient = null, current = new Date(), cache = {}, queueRows = [], selectedQueue = null, selectedDay = null, editingTask = null, dragTask = null, dragFromDay = null, dragFromIndex = null;
-    let canEdit = localStorage.getItem("tm_canEdit") === "1";
-    function peopleList(){ return Array.isArray(settings.peopleList) ? settings.peopleList.filter(Boolean) : DEFAULTS.peopleList; }
-    function amList(){ return Array.isArray(settings.amList) ? settings.amList.filter(Boolean) : DEFAULTS.amList; }
-    function personColor(person){ const arr = peopleList(); const i = arr.indexOf(person); return DEFAULT_COLORS[(i >= 0 ? i : 0) % DEFAULT_COLORS.length]; }
-    function fillSelect(select, values, selectedValue = "") {
-      select.innerHTML = "";
-      const unique = [...new Set(values.filter(v => String(v || "").trim()).map(v => String(v).trim()))];
-      unique.forEach(v => { const op = document.createElement("option"); op.value = v; op.textContent = v; select.appendChild(op); });
-      if (selectedValue && !unique.includes(selectedValue)) { const op = document.createElement("option"); op.value = selectedValue; op.textContent = selectedValue + " (from sheet)"; select.insertBefore(op, select.firstChild); }
-      if (selectedValue) select.value = selectedValue;
-    }
-    function refreshPeopleAndAmDropdowns(defaultAm = "") {
-      const people = peopleList(); const ams = amList();
-      fillSelect(assignPerson, people);
-      fillSelect(taskPerson, people);
-      fillSelect(filterPerson, ["", ...people]);
-      if (filterPerson.options[0]) filterPerson.options[0].textContent = "All people";
-      fillSelect(assignAM, ams, defaultAm);
-      fillSelect(taskAM, ams, defaultAm);
-      assignType.innerHTML = ""; taskType.innerHTML = "";
-      TYPES.forEach(t => { assignType.innerHTML += `<option>${t}</option>`; taskType.innerHTML += `<option>${t}</option>`; });
-    }
-    function logDebug(...args) { console.log(...args); const b = document.getElementById("debugBox"); if (!b) return; const msg = args.map(x => typeof x === "string" ? x : JSON.stringify(x, null, 2)).join(" "); b.textContent += "\n" + msg; b.scrollTop = b.scrollHeight }
-    function clearDebug() { if (debugBox) debugBox.textContent = "Ready." }
-    function toast(msg, color = "#333") { const t = document.getElementById("toast"); t.textContent = msg; t.style.background = color; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 1800) }
-    function esc(s) { return String(s ?? "").replace(/[&<>'"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c])) }
-    function formatDate(y, m, d) { return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}` }
-    function todayStr() { return new Date().toISOString().slice(0, 10) }
-    function toDateInput(v) {
-      if (!v) return null;
+</div>
 
-      if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
-        return v;
-      }
+<div class="modal" id="memberModal" onclick="closeModalOnBg(event,'memberModal')">
+  <div class="box">
+    <h3 id="memberModalTitle">Member / AM</h3>
+    <div class="form">
+      <div class="field"><label>Name</label><input id="memberName"></div>
+      <div class="field"><label>Role</label><select id="memberRole"><option>WEB</option><option>AM</option><option>BOTH</option></select></div>
+      <div class="field"><label>Telegram Chat ID</label><input id="memberTelegram"></div>
+      <div class="field"><label>Max task/day</label><input id="memberMaxDay" type="number" min="0" step="1"></div>
+      <div class="field"><label>Color</label><input id="memberColor" type="color"></div>
+      <div class="field"><label>Active</label><select id="memberActive"><option value="true">Active</option><option value="false">Inactive</option></select></div>
+    </div>
+    <div class="actions"><button class="ghost" onclick="closeModal('memberModal')">Cancel</button><button class="primary" onclick="saveMember()">Save</button></div>
+  </div>
+</div>
 
-      const d = new Date(v);
+<div id="toast" class="toast"></div>
 
-      if (isNaN(d.getTime())) {
-        return null;
-      }
+<script>
+const DEFAULTS={editCode:"TEAM2026",supabaseUrl:"",supabaseKey:"",sheetApi:"",telegramWebhook:""};
+const TYPES=["Design + QR","Design","Menu + QR","Menu","QR"];
+const PACKAGE_POINTS={"Gói S":1,"Gói P":1,"Gói G":1.2,"Gói F":1.2,"Gói Menu + QR":1.5,"Gói Custom":2};
+const FALLBACK_MEMBERS=[
+  {name:"Tony",role:"WEB",telegram_chat_id:"1767769751",active:true,color:"#ff8a80",max_per_day:6},
+  {name:"Alex",role:"WEB",telegram_chat_id:"1420324274",active:true,color:"#ffe082",max_per_day:6},
+  {name:"Lucas",role:"WEB",telegram_chat_id:"8314965256",active:true,color:"#b0bec5",max_per_day:6},
+  {name:"Allen",role:"WEB",telegram_chat_id:"843310853",active:true,color:"#90caf9",max_per_day:6},
+  {name:"Hayden",role:"WEB",telegram_chat_id:"1674652037",active:true,color:"#f48fb1",max_per_day:6},
+  {name:"Leo",role:"WEB",telegram_chat_id:"6196989586",active:true,color:"#ce93d8",max_per_day:6},
+  {name:"Dante",role:"WEB",telegram_chat_id:"7359430356",active:true,color:"#a5d6a7",max_per_day:6},
+  {name:"Nancy",role:"AM",telegram_chat_id:"1919440686",active:true,color:"#f05a28",max_per_day:0},
+  {name:"Rosie",role:"AM",telegram_chat_id:"7761061776",active:true,color:"#f05a28",max_per_day:0}
+];
 
-      return d.toISOString().slice(0, 10);
-    }
-    function pkgFromId(id) { const s = String(id || "").trim(); if (s.includes("*")) return "Gói Custom"; const c = s.charAt(5); if (c === "0") return "Gói Menu + QR"; if (/[123]/.test(c)) return "Gói Custom"; return { S: "Gói S", P: "Gói P", G: "Gói G", F: "Gói F" }[c] || "Gói Custom" }
-    function pointFor(pkg, pri = "Normal") { let p = PACKAGE_POINTS[pkg] || 1; if (pri === "Urgent") p += .5; if (pri === "High") p += .25; return p }
-    function requireDb() { if (!supabaseClient) { toast("Chưa cấu hình Supabase trong Setup", "#b71c1c"); return false } return true }
-    function initClient() { if (settings.supabaseUrl && settings.supabaseKey) supabaseClient = supabase.createClient(settings.supabaseUrl, settings.supabaseKey) }
-    function setupUi() {
-      document.querySelectorAll(".nav button").forEach(b => b.onclick = () => showPage(b.dataset.page));
-      refreshPeopleAndAmDropdowns();
-      workloadDate.value = todayStr();
-      setSupabaseUrl.value = settings.supabaseUrl || "";
-      setSupabaseKey.value = settings.supabaseKey || "";
-      setSheetApi.value = settings.sheetApi || "";
-      setTelegram.value = settings.telegramWebhook || "";
-      if (document.getElementById("setPeopleList")) setPeopleList.value = peopleList().join("\n");
-      if (document.getElementById("setAmList")) setAmList.value = amList().join("\n");
-      updateEditState();
-    }
-    function saveSettings() {
-      settings.supabaseUrl = setSupabaseUrl.value.trim();
-      settings.supabaseKey = setSupabaseKey.value.trim();
-      settings.sheetApi = setSheetApi.value.trim();
-      settings.telegramWebhook = setTelegram.value.trim();
-      if (document.getElementById("setPeopleList")) settings.peopleList = setPeopleList.value.split("\n").map(x => x.trim()).filter(Boolean);
-      if (document.getElementById("setAmList")) settings.amList = setAmList.value.split("\n").map(x => x.trim()).filter(Boolean);
-      localStorage.setItem("tm_settings", JSON.stringify(settings));
-      initClient();
-      refreshPeopleAndAmDropdowns();
-      toast("Đã lưu setup", "#2e7d32");
-    }
-    function unlockEdit() { if (editCode.value === settings.editCode) { canEdit = true; localStorage.setItem("tm_canEdit", "1"); updateEditState(); renderCalendarOnly(); toast("Edit unlocked", "#2e7d32") } else toast("Wrong code", "#b71c1c") }
-    function updateEditState() { editState.textContent = canEdit ? "✅ Đang mở quyền edit" : "🔒 Chỉ xem" }
-    function showPage(page) { document.querySelectorAll(".nav button").forEach(b => b.classList.toggle("active", b.dataset.page === page));["queue", "calendar", "workload", "report", "setup"].forEach(p => document.getElementById(`page-${p}`).classList.toggle("hidden", p !== page)); if (page === "queue") loadQueue(); if (page === "calendar") render(); if (page === "workload") renderWorkload(); if (page === "report") renderReport() }
-    async function sendTelegram(data) { if (!settings.telegramWebhook) return; try { await fetch(settings.telegramWebhook, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(data) }) } catch (e) { console.error("Telegram error", e) } }
-    async function loadQueue() {
-      if (!requireDb()) return;
+let settings={...DEFAULTS,...JSON.parse(localStorage.getItem("tm_settings")||"{}")};
+let supabaseClient=null,current=new Date(),cache={},queueRows=[],members=[],auditLogs=[];
+let selectedQueue=null,selectedDay=null,editingTask=null,editingMember=null,dragTask=null,dragFromDay=null,dragFromIndex=null;
+let canEdit=localStorage.getItem("tm_canEdit")==="1";
 
-      const { data, error } = await supabaseClient
-        .from("task_queue")
-        .select("*")
-        .order("updated_at", { ascending: false })
-        .limit(5000);
+function esc(s){return String(s??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]))}
+function toast(msg,color="#333"){toastEl=document.getElementById("toast");toastEl.textContent=msg;toastEl.style.background=color;toastEl.classList.add("show");setTimeout(()=>toastEl.classList.remove("show"),1800)}
+function logDebug(...args){console.log(...args);const b=document.getElementById("debugBox");if(!b)return;const msg=args.map(x=>typeof x==="string"?x:JSON.stringify(x,null,2)).join(" ");b.textContent+="\n"+msg;b.scrollTop=b.scrollHeight}
+function clearDebug(){const b=document.getElementById("debugBox");if(b)b.textContent="Ready."}
+function formatDate(y,m,d){return `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`}
+function todayStr(){return new Date().toISOString().slice(0,10)}
+function toDateInput(v){if(!v)return null;if(typeof v==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(v))return v;const d=new Date(v);return isNaN(d.getTime())?null:d.toISOString().slice(0,10)}
+function normalizeProjectId(project){return String(project||"").trim().toUpperCase().replace(/[^\w\s-]/g,"").replace(/\s+/g,"-").slice(0,180)}
+function pkgFromId(id){const s=String(id||"").trim();if(s.includes("*"))return"Gói Custom";const c=s.charAt(5);if(c==="0")return"Gói Menu + QR";if(/[123]/.test(c))return"Gói Custom";return{S:"Gói S",P:"Gói P",G:"Gói G",F:"Gói F"}[c]||"Gói Custom"}
+function pointFor(pkg,pri="Normal"){let p=PACKAGE_POINTS[pkg]||1;if(pri==="Urgent")p+=.5;if(pri==="High")p+=.25;return p}
+function requireDb(){if(!supabaseClient){toast("Chưa cấu hình Supabase trong Setup","#b71c1c");return false}return true}
+function initClient(){if(settings.supabaseUrl&&settings.supabaseKey)supabaseClient=supabase.createClient(settings.supabaseUrl,settings.supabaseKey)}
+function webMembers(){return members.filter(m=>m.active!==false&&(m.role==="WEB"||m.role==="BOTH"))}
+function amMembers(){return members.filter(m=>m.active!==false&&(m.role==="AM"||m.role==="BOTH"))}
+function memberByName(name){return members.find(m=>String(m.name).toLowerCase().trim()===String(name).toLowerCase().trim())||null}
+function personColor(name){return memberByName(name)?.color||"#ff8a80"}
+function peopleNames(){return webMembers().map(m=>m.name)}
+function amNames(){const arr=amMembers().map(m=>m.name);return arr.includes("None")?arr:["None",...arr]}
 
-      if (error) {
-        toast("Lỗi load queue: " + error.message, "#b71c1c");
-        console.error(error);
-        return;
-      }
+function fillSelect(select,values,selected=""){select.innerHTML="";[...new Set(values.filter(v=>v!==undefined&&v!==null).map(v=>String(v).trim()))].forEach(v=>{const op=document.createElement("option");op.value=v;op.textContent=v||"All people";select.appendChild(op)});if(selected&&!Array.from(select.options).some(o=>o.value===selected)){const op=document.createElement("option");op.value=selected;op.textContent=selected+" (from sheet)";select.insertBefore(op,select.firstChild)} if(selected)select.value=selected}
+function refreshDropdowns(defaultAm=""){fillSelect(assignPerson,peopleNames());fillSelect(taskPerson,peopleNames());fillSelect(filterPerson,["",...peopleNames()]);fillSelect(assignAM,amNames(),defaultAm);fillSelect(taskAM,amNames(),defaultAm);assignType.innerHTML="";taskType.innerHTML="";TYPES.forEach(t=>{assignType.innerHTML+=`<option>${t}</option>`;taskType.innerHTML+=`<option>${t}</option>`})}
 
-      queueRows = data || [];
-      renderQueueFilters();
-      renderQueue();
-      renderQueueKpis();
-    }
+async function ensureDefaultMembers(){if(!requireDb())return;const {data,error}=await supabaseClient.from("members").select("id").limit(1);if(error){console.warn(error);members=FALLBACK_MEMBERS;return}if(data&&data.length)return;await supabaseClient.from("members").insert(FALLBACK_MEMBERS)}
+async function loadMembers(){if(!requireDb()){members=FALLBACK_MEMBERS;refreshDropdowns();return}await ensureDefaultMembers();const {data,error}=await supabaseClient.from("members").select("*").order("role").order("name");if(error){console.warn("members fallback",error);members=FALLBACK_MEMBERS}else{members=data||[]}refreshDropdowns();renderMembers()}
+function renderMembers(){if(!document.getElementById("membersBody"))return;membersBody.innerHTML=members.map(m=>`<tr><td><b>${esc(m.name)}</b></td><td>${esc(m.role)}</td><td>${esc(m.telegram_chat_id||"")}</td><td>${esc(m.max_per_day??"")}</td><td>${m.active===false?"No":"Yes"}</td><td><span style="display:inline-block;width:22px;height:14px;border-radius:4px;background:${esc(m.color||"#ddd")}"></span> ${esc(m.color||"")}</td><td><button onclick='openMemberModal(${JSON.stringify(m.id)})'>Edit</button> <button class="danger" onclick='deleteMember(${JSON.stringify(m.id)})'>Delete</button></td></tr>`).join("")}
+function openMemberModal(id=null){editingMember=id?members.find(m=>m.id===id):null;memberModalTitle.textContent=editingMember?"Edit member/AM":"Add member/AM";memberName.value=editingMember?.name||"";memberRole.value=editingMember?.role||"WEB";memberTelegram.value=editingMember?.telegram_chat_id||"";memberMaxDay.value=editingMember?.max_per_day??6;memberColor.value=editingMember?.color||"#ff8a80";memberActive.value=String(editingMember?.active!==false);openModal("memberModal")}
+async function saveMember(){if(!requireDb())return;const payload={name:memberName.value.trim(),role:memberRole.value,telegram_chat_id:memberTelegram.value.trim()||null,max_per_day:memberMaxDay.value===""?null:Number(memberMaxDay.value),color:memberColor.value,active:memberActive.value==="true"};if(!payload.name){toast("Thiếu name","#b71c1c");return}let res;if(editingMember)res=await supabaseClient.from("members").update(payload).eq("id",editingMember.id);else res=await supabaseClient.from("members").insert(payload);if(res.error){toast(res.error.message,"#b71c1c");return}closeModal("memberModal");toast("Saved member","#2e7d32");await loadMembers();await logAction("member_save",null,payload.name,"",payload.name,"Saved member")}
+async function deleteMember(id){if(!requireDb())return;if(!confirm("Delete member/AM này?"))return;const {error}=await supabaseClient.from("members").delete().eq("id",id);if(error){toast(error.message,"#b71c1c");return}toast("Deleted","#b71c1c");await loadMembers()}
 
-    function renderQueueFilters() {
-      const cur = queuePackageFilter.value;
-      const ps = [...new Set(queueRows.map(r => r.package_name || pkgFromId(r.source_id)).filter(Boolean))].sort();
-      queuePackageFilter.innerHTML = '<option value="">Tất cả gói</option>' + ps.map(p => `<option>${esc(p)}</option>`).join("");
-      queuePackageFilter.value = cur;
-    }
+function setupUi(){document.querySelectorAll(".nav button").forEach(b=>b.onclick=()=>showPage(b.dataset.page));workloadDate.value=todayStr();setSupabaseUrl.value=settings.supabaseUrl||"";setSupabaseKey.value=settings.supabaseKey||"";setSheetApi.value=settings.sheetApi||"";setTelegram.value=settings.telegramWebhook||"";updateEditState()}
+function saveSettings(){settings.supabaseUrl=setSupabaseUrl.value.trim();settings.supabaseKey=setSupabaseKey.value.trim();settings.sheetApi=setSheetApi.value.trim();settings.telegramWebhook=setTelegram.value.trim();localStorage.setItem("tm_settings",JSON.stringify(settings));initClient();toast("Đã lưu setup","#2e7d32");loadMembers()}
+function unlockEdit(){if(editCode.value===settings.editCode){canEdit=true;localStorage.setItem("tm_canEdit","1");updateEditState();renderCalendarOnly();toast("Edit unlocked","#2e7d32")}else toast("Wrong code","#b71c1c")}
+function updateEditState(){editState.textContent=canEdit?"✅ Đang mở quyền edit":"🔒 Chỉ xem"}
+function showPage(page){document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("active",b.dataset.page===page));["queue","calendar","workload","report","members","logs","setup"].forEach(p=>document.getElementById(`page-${p}`).classList.toggle("hidden",p!==page));if(page==="queue")loadQueue();if(page==="calendar")render();if(page==="workload")renderWorkload();if(page==="report")renderReport();if(page==="members")loadMembers();if(page==="logs")loadAuditLogs()}
 
-    function renderQueueKpis() {
-      const currentCount = queueRows.filter(r => r.is_current && (r.queue_status || "NEW") === "NEW").length;
-      if (document.getElementById("kpiCurrent")) kpiCurrent.textContent = currentCount;
-      if (document.getElementById("kpiNew")) kpiNew.textContent = queueRows.filter(r => (r.queue_status || "NEW") === "NEW").length;
-      kpiAssigned.textContent = queueRows.filter(r => r.queue_status === "ASSIGNED").length;
-      if (document.getElementById("kpiPending")) kpiPending.textContent = queueRows.filter(r => r.queue_status === "PENDING_INFO").length;
-      kpiToday.textContent = Object.values(cache).flat().filter(t => t.task_date === todayStr()).length;
-    }
-    function renderQueue() {
-      const st = queueStatusFilter.value, pkg = queuePackageFilter.value, q = queueSearch.value.trim().toLowerCase();
-      let rows = [...queueRows];
-      if (st === "CURRENT") rows = rows.filter(r => r.is_current && (r.queue_status || "NEW") === "NEW");
-      else if (st === "STALE") rows = rows.filter(r => !r.is_current);
-      else if (st !== "ALL") rows = rows.filter(r => (r.queue_status || "NEW") === st);
-      if (pkg) rows = rows.filter(r => (r.package_name || pkgFromId(r.source_id)) === pkg);
-      if (q) rows = rows.filter(r => [r.source_id, r.project, r.am, r.package_name].join(" ").toLowerCase().includes(q));
-      queueBody.innerHTML = rows.map(r => {
-        const status = r.queue_status || "NEW", pn = r.package_name || pkgFromId(r.source_id), sid = String(r.source_id).replace(/"/g, "&quot;");
-        return `<tr><td><b>${esc(r.source_id)}</b></td><td><b>${esc(r.project)}</b><div class="muted">${esc(r.note || "")}</div></td><td>${esc(r.am || "")}</td><td>${esc(r.start_date || "")}</td><td>${esc(r.expired_date || "")}</td><td><span class="badge">${esc(pn)}</span></td><td>${r.template_url ? `<a href="${esc(r.template_url)}" target="_blank">Open</a>` : ""}</td><td>${r.layout_url ? `<a href="${esc(r.layout_url)}" target="_blank">Open</a>` : ""}</td><td><span class="badge ${status === "ASSIGNED" ? "assigned" : status === "PENDING_INFO" ? "pending" : status === "SKIPPED" ? "urgent" : "new"}">${esc(status)}</span></td><td><button class="primary" onclick='openAssign("${sid}")'>Assign</button> <button class="ghost" onclick='skipQueue("${sid}")'>Skip</button> ${status === "ASSIGNED" ? `<button class="warn" onclick='unassignQueue("${sid}")'>Unassign</button>` : ""}</td></tr>`;
-      }).join("");
-    }
-    async function syncQueueFromApi() {
-      clearDebug(); console.group("[Task Queue] Sync từ Sheet API"); logDebug("[Task Queue] Sync từ Sheet API");
-      logDebug("Settings", { hasSupabaseClient: !!supabaseClient, sheetApi: settings.sheetApi, supabaseUrl: settings.supabaseUrl, hasSupabaseKey: !!settings.supabaseKey });
-      if (!requireDb()) { console.groupEnd(); return; }
-      if (!settings.sheetApi) { toast("Chưa nhập Apps Script API URL trong Setup", "#b71c1c"); console.groupEnd(); return; }
-      try {
-        toast("Đang sync từ Sheet...", "#f05a28");
-        const json = await loadSheetQueueJsonp(settings.sheetApi); logDebug("Raw API response", json);
-        if (!json) throw new Error("Apps Script API không trả dữ liệu.");
-        if (json.success === false) throw new Error(json.error || "Apps Script API trả success=false.");
-        const rows = Array.isArray(json) ? json : (json.data || []); logDebug("Rows parsed", { total: rows.length, firstFive: rows.slice(0, 5) });
-        const nowIso = new Date().toISOString();
-        await supabaseClient.from("task_queue").update({ is_current: false }).neq("source_id", "__never__");
-        let payload = rows.map((r, idx) => {
-          const project = String(r.project || r.Project || r.Projects || "").trim();
-          let sourceId = String(r.source_id || "").trim();
-          if (!sourceId) sourceId = project.trim().toUpperCase().replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").slice(0, 180);
-          if (!sourceId) sourceId = "ROW-" + String(r.row_number || idx + 1);
-          return {
-            source_id: sourceId, project, am: String(r.am || r.AM || "").trim(),
-            start_date: toDateInput(r.start || r.Start || r.start_date),
-            expired_date: toDateInput(r.expired || r.Expired || r.expired_date),
-            template_url: String(r.template || r.template_url || r["Template màu"] || "").trim(),
-            layout_url: String(r.layout || r.layout_url || r["Layout web"] || "").trim(),
-            package_name: r.package_name || pkgFromId(sourceId), source_status: r.status || r.Status || "Doing",
-            queue_status: "NEW", source_row: r.row_number ? String(r.row_number) : null, note: r.note || null,
-            is_current: true, last_seen_at: nowIso, updated_at: nowIso
-          };
-        }).filter(r => r.source_id && r.project);
-        const seen = new Set(); payload = payload.filter(item => { if (seen.has(item.source_id)) { logDebug("Duplicate source_id skipped", item.source_id); return false; } seen.add(item.source_id); return true; });
-        logDebug("Payload to Supabase", { total: payload.length, firstFive: payload.slice(0, 5) });
-        if (!payload.length) { toast("API không có task hợp lệ", "#8a6d00"); return; }
-        const { data, error } = await supabaseClient.from("task_queue").upsert(payload, { onConflict: "source_id", ignoreDuplicates: false }).select();
-        logDebug("Supabase upsert result", { count: data ? data.length : 0, error });
-        if (error) throw error;
-        queueStatusFilter.value = "CURRENT"; toast(`Đã sync ${payload.length} task vào queue`, "#2e7d32"); await loadQueue();
-      } catch (e) { console.error(e); logDebug("SYNC ERROR", e.message || e); toast("Sync lỗi: " + (e.message || e), "#b71c1c"); } finally { console.groupEnd(); }
-    }
-    function loadSheetQueueJsonp(apiUrl) { return new Promise((resolve, reject) => { const cb = "sheetQueueCb_" + Date.now() + "_" + Math.floor(Math.random() * 100000); const sep = apiUrl.includes("?") ? "&" : "?"; const url = `${apiUrl}${sep}action=queue&callback=${cb}`; logDebug("JSONP callback name", cb); logDebug("JSONP request URL", url); const s = document.createElement("script"); const timer = setTimeout(() => { cleanup(); reject(new Error("Sheet API timeout sau 20s. Kiểm tra Apps Script URL / deploy / quyền.")) }, 20000); function cleanup() { clearTimeout(timer); delete window[cb]; if (s.parentNode) s.parentNode.removeChild(s) } window[cb] = data => { logDebug("JSONP callback received", data); cleanup(); resolve(data) }; s.onerror = () => { cleanup(); reject(new Error("Không load được Apps Script API. Copy JSONP request URL mở trực tiếp trên browser để xem lỗi.")) }; s.onload = () => logDebug("JSONP script loaded. Nếu không thấy callback received thì Apps Script chưa trả đúng callback(...). "); s.src = url; document.body.appendChild(s) }) }
-    async function skipQueue(id) { if (!requireDb()) return; const { error } = await supabaseClient.from("task_queue").update({ queue_status: "SKIPPED", updated_at: new Date().toISOString() }).eq("source_id", id); if (error) { toast(error.message, "#b71c1c"); return } await loadQueue() }
-    async function unassignQueue(sourceId) {
-      if (!requireDb()) return;
-      const ok = confirm("Hủy assign task này và trả về Tiệm mới đủ info?");
-      if (!ok) return;
-      const { error: deleteError } = await supabaseClient.from("tasks").delete().eq("source_id", sourceId);
-      if (deleteError) { toast("Lỗi xóa task calendar: " + deleteError.message, "#b71c1c"); console.error(deleteError); return; }
-      const { error: queueError } = await supabaseClient.from("task_queue").update({ queue_status: "NEW", assigned_person: null, assigned_date: null, priority: "Normal", is_current: true, updated_at: new Date().toISOString() }).eq("source_id", sourceId);
-      if (queueError) { toast("Lỗi trả về queue: " + queueError.message, "#b71c1c"); console.error(queueError); return; }
-      toast("Đã hủy assign và trả về queue", "#2e7d32");
-      await Promise.all([loadQueue(), render()]);
-    }
-    function openAssign(id) {
-      selectedQueue = queueRows.find(r => r.source_id === id);
-      if (!selectedQueue) return;
-      const sheetAm = selectedQueue.am || "None";
-      refreshPeopleAndAmDropdowns(sheetAm);
-      assignTitle.textContent = "Assign — " + selectedQueue.source_id;
-      assignText.value = `${selectedQueue.project}`;
-      assignAM.value = sheetAm;
-      assignDate.value = selectedQueue.expired_date || todayStr();
-      assignType.value = inferType(selectedQueue);
-      assignPriority.value = "Normal";
-      assignPerson.value = suggestPerson(assignDate.value);
-      assignNote.value = selectedQueue.note || "";
-      openModal("assignModal");
-    }
-    function inferType(r) { const t = String(r.template_url || "").trim(), l = String(r.layout_url || "").trim(); if (t && l) return "Design + QR"; if (t) return "Design"; if (l) return "Menu + QR"; return "Design + QR" }
-    function suggestPerson(date) { const by = getTasksByPersonForDate(date); let best = peopleList()[0] || "Allen", min = Infinity; peopleList().forEach(p => { const n = by[p] || 0; if (n < min) { min = n; best = p } }); return best }
-    function getTasksByPersonForDate(date) { const by = {}; Object.values(cache).flat().filter(t => t.task_date === date).forEach(t => by[t.person] = (by[t.person] || 0) + 1); return by }
-    async function assignQueueTask() {
-      if (!requireDb() || !selectedQueue) return;
-      const person = assignPerson.value, taskDate = assignDate.value, type = assignType.value, am = assignAM.value || "None", text = assignText.value.trim();
-      if (!text || !person || !taskDate || !type) { toast("Thiếu thông tin assign", "#b71c1c"); return; }
-      const sourceId = selectedQueue.source_id;
-      const payload = { source_id: sourceId, task_date: taskDate, text, person, type, am, done: false, sort_order: 999, priority: assignPriority.value, package_name: selectedQueue.package_name || pkgFromId(sourceId), note: assignNote.value || null };
-      let taskId = null;
-      const { data: existingTasks, error: checkError } = await supabaseClient.from("tasks").select("id").eq("source_id", sourceId).limit(1);
-      if (checkError) { toast("Lỗi check task: " + checkError.message, "#b71c1c"); console.error(checkError); return; }
-      if (existingTasks && existingTasks.length > 0) {
-        taskId = existingTasks[0].id;
-        const { error: updateError } = await supabaseClient.from("tasks").update(payload).eq("id", taskId);
-        if (updateError) { toast("Lỗi update task: " + updateError.message, "#b71c1c"); console.error(updateError); return; }
-      } else {
-        const { data: insertedTask, error: insertError } = await supabaseClient.from("tasks").insert(payload).select("id").single();
-        if (insertError) { toast("Lỗi insert task: " + insertError.message, "#b71c1c"); console.error(insertError); return; }
-        taskId = insertedTask?.id || null;
-      }
-      const { error: queueError } = await supabaseClient.from("task_queue").update({ queue_status: "ASSIGNED", assigned_person: person, assigned_date: taskDate, priority: assignPriority.value, updated_at: new Date().toISOString() }).eq("source_id", sourceId);
-      if (queueError) { toast("Task đã add nhưng lỗi update queue: " + queueError.message, "#b71c1c"); console.error(queueError); return; }
-      await sendTelegram({ event: "new", person, type, am, message: `Project: ${text}\nType: ${type}\n\nMember: ${person}\nAM: ${am}\n📅 ${taskDate}` });
-      closeModal("assignModal"); toast("Đã add vào calendar", "#2e7d32");
-      const assignedDateObj = new Date(taskDate + "T00:00:00"); if (!isNaN(assignedDateObj.getTime())) current = assignedDateObj;
-      await Promise.all([loadQueue(), render()]); showPage("calendar");
-    }
-    async function markQueuePending() { if (!requireDb() || !selectedQueue) return; await supabaseClient.from("task_queue").update({ queue_status: "PENDING_INFO", updated_at: new Date().toISOString() }).eq("source_id", selectedQueue.source_id); closeModal("assignModal"); await loadQueue() }
-    function openBulkAutoAssign() { toast("Gợi ý: bấm Assign, hệ thống tự chọn người ít task nhất theo ngày", "#f05a28") }
-    async function loadCalendarTasks() { if (!requireDb()) return; const y = current.getFullYear(), m = current.getMonth(); const start = formatDate(y, m, 1), end = formatDate(y, m, new Date(y, m + 1, 0).getDate()); const { data, error } = await supabaseClient.from("tasks").select("*").gte("task_date", start).lte("task_date", end).order("sort_order", { ascending: true }); if (error) { toast("Lỗi load calendar: " + error.message, "#b71c1c"); return } cache = {}; (data || []).forEach(t => { const d = +String(t.task_date).slice(8, 10); (cache[d] ??= []).push(t) }); renderQueueKpis() }
-    async function render() { await loadCalendarTasks(); renderCalendarOnly() }
-    function renderCalendarOnly() { calendar.innerHTML = ""; calendarTitle.textContent = `Tháng ${current.getMonth() + 1}/${current.getFullYear()}`; const y = current.getFullYear(), m = current.getMonth(), days = new Date(y, m + 1, 0).getDate(), offset = (new Date(y, m, 1).getDay() + 6) % 7, now = new Date(); for (let i = 0; i < offset; i++)calendar.appendChild(document.createElement("div")); for (let d = 1; d <= days; d++) { const day = document.createElement("div"); day.className = "day" + (now.getFullYear() === y && now.getMonth() === m && now.getDate() === d ? " today" : ""); day.innerHTML = `<div class="dayno"><span>${d}</span><span>${(cache[d] || []).length}</span></div>`; let tasks = [...(cache[d] || [])]; if (filterPerson.value) tasks = tasks.filter(t => t.person === filterPerson.value); if (viewMode.value === "assign") tasks.sort((a, b) => peopleList().indexOf(a.person) - peopleList().indexOf(b.person)); tasks.forEach(t => day.appendChild(taskEl(t, d))); if (canEdit) { const add = document.createElement("div"); add.className = "add"; add.textContent = "+ Add task"; add.onclick = () => openAddTask(d); day.appendChild(add); day.ondragover = e => e.preventDefault(); day.ondrop = () => dropToOtherDay(d) } calendar.appendChild(day) } }
-    function taskEl(t, d) { const el = document.createElement("div"); el.className = "task" + (t.done ? " done" : ""); el.style.background = personColor(t.person); el.draggable = canEdit; el.ondragstart = () => { dragTask = t; dragFromDay = d; dragFromIndex = cache[d].indexOf(t) }; el.ondragover = e => canEdit && e.preventDefault(); el.ondrop = e => { e.preventDefault(); reorderInDay(d, t) }; if (canEdit) el.onclick = () => toggleDone(t); el.innerHTML = `<div class="tt">${esc(t.text)}</div><div class="tm">${esc(t.person)} • ${esc(t.type)} (AM: ${esc(t.am || "N/A")})</div>`; if (canEdit) { const a = document.createElement("div"); a.className = "act"; a.innerHTML = `<button class="mini">✏</button><button class="mini">📋</button><button class="mini">✖</button>`; a.children[0].onclick = e => { e.stopPropagation(); openEditTask(t, d) }; a.children[1].onclick = e => { e.stopPropagation(); navigator.clipboard.writeText(t.text); toast("Copied", "#2e7d32") }; a.children[2].onclick = e => { e.stopPropagation(); removeTask(t.id) }; el.appendChild(a) } return el }
-    function openAddTask(d) { selectedDay = d; editingTask = null; refreshPeopleAndAmDropdowns(); taskModalTitle.textContent = "Add task"; taskText.value = ""; taskPerson.value = peopleList()[0] || "Allen"; taskType.value = TYPES[0]; taskAM.value = "None"; taskPriority.value = "Normal"; taskNote.value = ""; openModal("taskModal") }
-    function openEditTask(t, d) { selectedDay = d; editingTask = t; refreshPeopleAndAmDropdowns(t.am || "None"); taskModalTitle.textContent = "Edit task"; taskText.value = t.text; taskPerson.value = t.person; taskType.value = t.type; taskAM.value = t.am || "None"; taskPriority.value = t.priority || "Normal"; taskNote.value = t.note || ""; openModal("taskModal") }
-    async function saveTaskFromModal() { if (!requireDb() || !canEdit || !selectedDay) return; const task_date = formatDate(current.getFullYear(), current.getMonth(), selectedDay); const p = { text: taskText.value.trim(), person: taskPerson.value, type: taskType.value, am: taskAM.value || "None", priority: taskPriority.value, note: taskNote.value || null }; if (!p.text) { toast("Empty task", "#b71c1c"); return } let error; if (editingTask) { ({ error } = await supabaseClient.from("tasks").update(p).eq("id", editingTask.id)); await sendTelegram({ event: "update", person: p.person, type: p.type, am: p.am, message: `Project: ${p.text}\nType: ${p.type}\n\nMember: ${p.person}\nAM: ${p.am}` }) } else { ({ error } = await supabaseClient.from("tasks").insert({ ...p, task_date, done: false, sort_order: (cache[selectedDay]?.length || 0) })); await sendTelegram({ event: "new", person: p.person, type: p.type, am: p.am, message: `Project: ${p.text}\nType: ${p.type}\n\nAM: ${p.am}\n📅 ${task_date}` }) } if (error) { toast(error.message, "#b71c1c"); return } closeModal("taskModal"); toast("Saved", "#2e7d32"); await render() }
-    async function toggleDone(t) { if (!requireDb() || !canEdit) return; t.done = !t.done; renderCalendarOnly(); const { error } = await supabaseClient.from("tasks").update({ done: t.done }).eq("id", t.id); if (error) { toast(error.message, "#b71c1c"); return } if (t.done) await sendTelegram({ event: "done", person: t.person, am: t.am, message: `✅ Completed\n${t.text}` }) }
-    async function removeTask(id) {
-      if (!requireDb() || !canEdit) return;
-      const { data: task, error: readError } = await supabaseClient.from("tasks").select("id, source_id, text").eq("id", id).single();
-      if (readError) { toast("Lỗi đọc task trước khi xóa: " + readError.message, "#b71c1c"); console.error(readError); return; }
-      const { error: deleteError } = await supabaseClient.from("tasks").delete().eq("id", id);
-      if (deleteError) { toast(deleteError.message, "#b71c1c"); console.error(deleteError); return; }
-      if (task && task.source_id) {
-        const { error: queueError } = await supabaseClient.from("task_queue").update({ queue_status: "NEW", assigned_person: null, assigned_date: null, priority: "Normal", is_current: true, updated_at: new Date().toISOString() }).eq("source_id", task.source_id);
-        if (queueError) { toast("Đã xóa task nhưng lỗi trả về queue: " + queueError.message, "#b71c1c"); console.error(queueError); await render(); return; }
-      }
-      toast("Đã xóa task và trả về queue", "#2e7d32");
-      await Promise.all([loadQueue(), render()]);
-    }
-    async function reorderInDay(day, target) { if (!dragTask || day !== dragFromDay) return; const list = cache[day], from = dragFromIndex, to = list.indexOf(target); if (from === to) return; list.splice(from, 1); list.splice(to, 0, dragTask); list.forEach((t, i) => t.sort_order = i); renderCalendarOnly(); await Promise.all(list.map(t => supabaseClient.from("tasks").update({ sort_order: t.sort_order }).eq("id", t.id))); dragTask = null }
-    async function dropToOtherDay(day) { if (!dragTask || day === dragFromDay) return; cache[dragFromDay] = cache[dragFromDay].filter(t => t !== dragTask); dragTask.task_date = formatDate(current.getFullYear(), current.getMonth(), day); (cache[day] ??= []).push(dragTask); cache[day].forEach((t, i) => t.sort_order = i); renderCalendarOnly(); await supabaseClient.from("tasks").update({ task_date: dragTask.task_date, sort_order: cache[day].indexOf(dragTask) }).eq("id", dragTask.id); await sendTelegram({ event: "move", person: dragTask.person, am: dragTask.am, message: `Project: ${dragTask.text}\n\n📅 New Date: ${dragTask.task_date}` }); dragTask = null }
-    function changeMonth(n) { current.setMonth(current.getMonth() + n); render() }
-    function renderWorkload() { const date = workloadDate.value || todayStr(), tasks = Object.values(cache).flat(), byD = {}, byM = {}; peopleList().forEach(p => { byD[p] = { count: 0, points: 0 }; byM[p] = { total: 0, done: 0, pending: 0 } }); tasks.forEach(t => { const pkg = t.package_name || pkgFromId(t.source_id); if (t.task_date === date && byD[t.person]) { byD[t.person].count++; byD[t.person].points += pointFor(pkg, t.priority) } if (byM[t.person]) { byM[t.person].total++; t.done ? byM[t.person].done++ : byM[t.person].pending++ } }); workloadDayBody.innerHTML = peopleList().map(p => { const v = byD[p]; const lab = v.points >= 2.5 ? '<span class="badge urgent">Quá tải</span>' : v.points >= 1.8 ? '<span class="badge pending">Hơi tải</span>' : '<span class="badge assigned">OK</span>'; return `<tr><td><b>${p}</b></td><td>${v.count}</td><td>${v.points.toFixed(1)}</td><td>${lab}</td></tr>` }).join(""); workloadMonthBody.innerHTML = peopleList().map(p => { const v = byM[p]; return `<tr><td><b>${p}</b></td><td>${v.total}</td><td>${v.done}</td><td>${v.pending}</td></tr>` }).join("") }
-    function renderReport() { const tasks = Object.values(cache).flat(); reportTotal.textContent = tasks.length; reportDone.textContent = tasks.filter(t => t.done).length; reportPending.textContent = tasks.filter(t => !t.done).length; const bt = {}, bp = {}; tasks.forEach(t => { bt[t.type] = (bt[t.type] || 0) + 1; bp[t.person] = (bp[t.person] || 0) + 1 }); reportByType.innerHTML = Object.keys(bt).sort().map(k => `<div style="display:flex;justify-content:space-between;margin:7px 0"><span>${esc(k)}</span><b>${bt[k]}</b></div>`).join("") || '<span class="muted">No data</span>'; reportByPerson.innerHTML = peopleList().map(p => `<div style="display:flex;justify-content:space-between;margin:7px 0"><span>${p}</span><b>${bp[p] || 0}</b></div>`).join("") }
-    function openModal(id) { document.getElementById(id).classList.add("open") } function closeModal(id) { document.getElementById(id).classList.remove("open") } function closeModalOnBg(e, id) { if (e.target.id === id) closeModal(id) }
-    initClient(); setupUi(); if (supabaseClient) { render(); loadQueue(); supabaseClient.channel("tasks-rt").on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, render).on("postgres_changes", { event: "*", schema: "public", table: "task_queue" }, loadQueue).subscribe() } else toast("Vào Setup để cấu hình Supabase", "#8a6d00");
-  </script>
+async function sendTelegram(data){if(!settings.telegramWebhook)return;try{await fetch(settings.telegramWebhook,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(data)})}catch(e){console.error("Telegram error",e)}}
+async function logAction(action,taskId,sourceId,project,person,detail="",am=""){if(!supabaseClient)return;try{await supabaseClient.from("task_audit_logs").insert({action,task_id:taskId,source_id:sourceId,project,person,am,detail})}catch(e){console.warn("audit log failed",e)}}
+async function loadAuditLogs(){if(!requireDb())return;const {data,error}=await supabaseClient.from("task_audit_logs").select("*").order("created_at",{ascending:false}).limit(300);if(error){toast("Lỗi load logs: "+error.message,"#b71c1c");return}auditLogs=data||[];logsBody.innerHTML=auditLogs.map(l=>`<tr><td>${esc(new Date(l.created_at).toLocaleString())}</td><td>${esc(l.action)}</td><td>${esc(l.project||"")}</td><td>${esc(l.person||"")}</td><td>${esc(l.am||"")}</td><td>${esc(l.detail||"")}</td></tr>`).join("")}
+
+async function loadQueue(){if(!requireDb())return;const {data,error}=await supabaseClient.from("task_queue").select("*").order("updated_at",{ascending:false}).limit(5000);if(error){toast("Lỗi load queue: "+error.message,"#b71c1c");console.error(error);return}queueRows=data||[];renderQueueFilters();renderQueue();renderQueueKpis()}
+function renderQueueFilters(){const cur=queuePackageFilter.value;const ps=[...new Set(queueRows.map(r=>r.package_name||pkgFromId(r.source_id)).filter(Boolean))].sort();queuePackageFilter.innerHTML='<option value="">Tất cả gói</option>'+ps.map(p=>`<option>${esc(p)}</option>`).join("");queuePackageFilter.value=cur}
+function renderQueueKpis(){kpiCurrent.textContent=queueRows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW").length;kpiNew.textContent=queueRows.filter(r=>(r.queue_status||"NEW")==="NEW").length;kpiAssigned.textContent=queueRows.filter(r=>r.queue_status==="ASSIGNED").length;kpiToday.textContent=Object.values(cache).flat().filter(t=>t.task_date===todayStr()).length}
+function safeSource(s){return String(s).replace(/"/g,"&quot;")}
+function renderQueue(){const st=queueStatusFilter.value,pkg=queuePackageFilter.value,q=queueSearch.value.trim().toLowerCase();let rows=[...queueRows];if(st==="CURRENT")rows=rows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW");else if(st!=="ALL")rows=rows.filter(r=>(r.queue_status||"NEW")===st);if(pkg)rows=rows.filter(r=>(r.package_name||pkgFromId(r.source_id))===pkg);if(q)rows=rows.filter(r=>[r.source_id,r.project,r.am,r.package_name].join(" ").toLowerCase().includes(q));queueBody.innerHTML=rows.map(r=>{const st=r.queue_status||"NEW",pn=r.package_name||pkgFromId(r.source_id);return `<tr><td><b>${esc(r.source_id)}</b></td><td><b>${esc(r.project)}</b><div class="muted">${esc(r.note||"")}</div></td><td>${esc(r.am||"")}</td><td>${esc(r.start_date||"")}</td><td>${esc(r.expired_date||"")}</td><td><span class="badge">${esc(pn)}</span></td><td>${r.template_url?`<a href="${esc(r.template_url)}" target="_blank">Open</a>`:""}</td><td>${r.layout_url?`<a href="${esc(r.layout_url)}" target="_blank">Open</a>`:""}</td><td><span class="badge ${st==="ASSIGNED"?"assigned":st==="PENDING_INFO"?"pending":st==="SKIPPED"?"urgent":"new"}">${esc(st)}</span></td><td><button class="primary" onclick='openAssign("${safeSource(r.source_id)}")'>Assign</button> <button class="ghost" onclick='skipQueue("${safeSource(r.source_id)}")'>Skip</button> ${st==="ASSIGNED"?`<button class="warn" onclick='unassignQueue("${safeSource(r.source_id)}")'>Unassign</button>`:""}</td></tr>`}).join("")}
+
+async function syncQueueFromApi(){clearDebug();console.group("[Task Queue] Sync từ Sheet API");logDebug("[Task Queue] Sync từ Sheet API");if(!requireDb()){console.groupEnd();return}if(!settings.sheetApi){toast("Chưa nhập Apps Script API URL","#b71c1c");console.groupEnd();return}try{toast("Đang sync từ Sheet...","#f05a28");const json=await loadSheetQueueJsonp(settings.sheetApi);logDebug("Raw API response",json);if(!json)throw new Error("Apps Script API không trả dữ liệu");if(json.success===false)throw new Error(json.error||"Apps Script API success=false");const rows=Array.isArray(json)?json:(json.data||[]);const nowIso=new Date().toISOString();await supabaseClient.from("task_queue").update({is_current:false}).neq("source_id","__never__");let payload=rows.map((r,idx)=>{const project=String(r.project||r.Project||r.Projects||"").trim();let sourceId=normalizeProjectId(project||r.source_id||"");if(!sourceId)sourceId="ROW-"+String(r.row_number||idx+1);return{source_id:sourceId,project,am:String(r.am||r.AM||"").trim(),start_date:toDateInput(r.start||r.Start||r.start_date),expired_date:toDateInput(r.expired||r.Expired||r.expired_date),template_url:String(r.template||r.template_url||r["Template màu"]||"").trim(),layout_url:String(r.layout||r.layout_url||r["Layout web"]||"").trim(),package_name:r.package_name||pkgFromId(sourceId),source_status:r.status||r.Status||"Doing",queue_status:"NEW",source_row:r.row_number?String(r.row_number):null,note:r.note||null,is_current:true,last_seen_at:nowIso,updated_at:nowIso}}).filter(r=>r.source_id&&r.project);const seen=new Set();payload=payload.filter(x=>{if(seen.has(x.source_id)){logDebug("Duplicate source_id skipped",x.source_id);return false}seen.add(x.source_id);return true});logDebug("Payload", {total:payload.length, firstFive:payload.slice(0,5)});if(!payload.length){toast("API không có task hợp lệ","#8a6d00");return}const {data,error}=await supabaseClient.from("task_queue").upsert(payload,{onConflict:"source_id",ignoreDuplicates:false}).select();logDebug("Supabase upsert result",{count:data?data.length:0,error});if(error)throw error;queueStatusFilter.value="CURRENT";toast(`Đã sync ${payload.length} task vào queue`,"#2e7d32");await loadQueue()}catch(e){console.error(e);logDebug("SYNC ERROR",e.message||e);toast("Sync lỗi: "+(e.message||e),"#b71c1c")}finally{console.groupEnd()}}
+function loadSheetQueueJsonp(apiUrl){return new Promise((resolve,reject)=>{const cb="sheetQueueCb_"+Date.now()+"_"+Math.floor(Math.random()*100000);const sep=apiUrl.includes("?")?"&":"?";const url=`${apiUrl}${sep}action=queue&callback=${cb}`;logDebug("JSONP request URL",url);const s=document.createElement("script");const timer=setTimeout(()=>{cleanup();reject(new Error("Sheet API timeout sau 20s"))},20000);function cleanup(){clearTimeout(timer);delete window[cb];if(s.parentNode)s.parentNode.removeChild(s)}window[cb]=data=>{logDebug("JSONP callback received",data);cleanup();resolve(data)};s.onerror=()=>{cleanup();reject(new Error("Không load được Apps Script API"))};s.onload=()=>logDebug("JSONP script loaded");s.src=url;document.body.appendChild(s)})}
+async function skipQueue(id){if(!requireDb())return;const {error}=await supabaseClient.from("task_queue").update({queue_status:"SKIPPED",updated_at:new Date().toISOString()}).eq("source_id",id);if(error){toast(error.message,"#b71c1c");return}await loadQueue()}
+async function unassignQueue(sourceId){if(!requireDb())return;if(!confirm("Hủy assign task này và trả về Tiệm mới đủ info?"))return;const {error:delErr}=await supabaseClient.from("tasks").delete().eq("source_id",sourceId);if(delErr){toast("Lỗi xóa task calendar: "+delErr.message,"#b71c1c");return}const {error:qErr}=await supabaseClient.from("task_queue").update({queue_status:"NEW",assigned_person:null,assigned_date:null,priority:"Normal",is_current:true,updated_at:new Date().toISOString()}).eq("source_id",sourceId);if(qErr){toast("Lỗi trả queue: "+qErr.message,"#b71c1c");return}await logAction("unassign",null,sourceId,sourceId,"","Unassign from queue");toast("Đã hủy assign và trả về queue","#2e7d32");await Promise.all([loadQueue(),render()])}
+
+function openAssign(id){selectedQueue=queueRows.find(r=>r.source_id===id);if(!selectedQueue)return;const sheetAm=selectedQueue.am||"None";refreshDropdowns(sheetAm);assignTitle.textContent="Assign — "+selectedQueue.source_id;assignText.value=selectedQueue.project;assignAM.value=sheetAm;assignDate.value=selectedQueue.expired_date||todayStr();assignType.value=inferType(selectedQueue);assignPriority.value="Normal";assignPerson.value=suggestPerson(assignDate.value);assignNote.value=selectedQueue.note||"";openModal("assignModal")}
+function inferType(r){const t=String(r.template_url||"").trim(),l=String(r.layout_url||"").trim();if(t&&l)return"Design + QR";if(t)return"Design";if(l)return"Menu + QR";return"Design + QR"}
+function suggestPerson(date){const by=getTasksByPersonForDate(date);let best=peopleNames()[0]||"Allen",min=Infinity;webMembers().forEach(m=>{const n=by[m.name]||0;const max=m.max_per_day||999;const score=n>=max?9999:n;if(score<min){min=score;best=m.name}});return best}
+function getTasksByPersonForDate(date){const by={};Object.values(cache).flat().filter(t=>t.task_date===date).forEach(t=>by[t.person]=(by[t.person]||0)+1);return by}
+
+async function assignQueueTask(){if(!requireDb()||!selectedQueue)return;const person=assignPerson.value,taskDate=assignDate.value,type=assignType.value,am=assignAM.value||"None",text=assignText.value.trim();if(!text||!person||!taskDate||!type){toast("Thiếu thông tin assign","#b71c1c");return}const sourceId=selectedQueue.source_id;const webMember=memberByName(person),amMember=memberByName(am);const payload={source_id:sourceId,task_date:taskDate,text,person,type,am,done:false,sort_order:999,priority:assignPriority.value,package_name:selectedQueue.package_name||pkgFromId(sourceId),note:assignNote.value||null};let taskId=null;const {data:exist,error:checkErr}=await supabaseClient.from("tasks").select("id").eq("source_id",sourceId).limit(1);if(checkErr){toast("Lỗi check task: "+checkErr.message,"#b71c1c");return}if(exist&&exist.length){taskId=exist[0].id;const {error}=await supabaseClient.from("tasks").update(payload).eq("id",taskId);if(error){toast("Lỗi update task: "+error.message,"#b71c1c");return}}else{const {data,error}=await supabaseClient.from("tasks").insert(payload).select("id").single();if(error){toast("Lỗi insert task: "+error.message,"#b71c1c");return}taskId=data?.id||null}const {error:qErr}=await supabaseClient.from("task_queue").update({queue_status:"ASSIGNED",assigned_person:person,assigned_date:taskDate,priority:assignPriority.value,updated_at:new Date().toISOString()}).eq("source_id",sourceId);if(qErr){toast("Task đã add nhưng lỗi update queue: "+qErr.message,"#b71c1c");return}const msg=`Project: ${text}\nType: ${type}\n\nMember: ${person}\nAM: ${am}\n📅 ${taskDate}`;await sendTelegram({event:"new",person,person_chat_id:webMember?.telegram_chat_id||"",am,am_chat_id:amMember?.telegram_chat_id||"",type,message:msg});await logAction("assign",taskId,sourceId,text,person,`Assigned to ${person} / AM ${am}`,am);closeModal("assignModal");toast("Đã add vào calendar","#2e7d32");const d=new Date(taskDate+"T00:00:00");if(!isNaN(d.getTime()))current=d;await Promise.all([loadQueue(),render()]);showPage("calendar")}
+async function markQueuePending(){if(!requireDb()||!selectedQueue)return;await supabaseClient.from("task_queue").update({queue_status:"PENDING_INFO",updated_at:new Date().toISOString()}).eq("source_id",selectedQueue.source_id);closeModal("assignModal");await loadQueue()}
+function openBulkAutoAssign(){toast("Gợi ý: bấm Assign, hệ thống tự chọn người ít task nhất theo ngày","#f05a28")}
+
+async function loadCalendarTasks(){if(!requireDb())return;const y=current.getFullYear(),m=current.getMonth();const start=formatDate(y,m,1),end=formatDate(y,m,new Date(y,m+1,0).getDate());const {data,error}=await supabaseClient.from("tasks").select("*").gte("task_date",start).lte("task_date",end).order("sort_order",{ascending:true});if(error){toast("Lỗi load calendar: "+error.message,"#b71c1c");return}cache={};(data||[]).forEach(t=>{const d=+String(t.task_date).slice(8,10);(cache[d]??=[]).push(t)});renderQueueKpis()}
+async function render(){await loadCalendarTasks();renderCalendarOnly()}
+function renderCalendarOnly(){calendar.innerHTML="";calendarTitle.textContent=`Tháng ${current.getMonth()+1}/${current.getFullYear()}`;const y=current.getFullYear(),m=current.getMonth(),days=new Date(y,m+1,0).getDate(),offset=(new Date(y,m,1).getDay()+6)%7,now=new Date();for(let i=0;i<offset;i++)calendar.appendChild(document.createElement("div"));for(let d=1;d<=days;d++){const day=document.createElement("div");day.className="day"+(now.getFullYear()===y&&now.getMonth()===m&&now.getDate()===d?" today":"");day.innerHTML=`<div class="dayno"><span>${d}</span><span>${(cache[d]||[]).length}</span></div>`;let tasks=[...(cache[d]||[])];if(filterPerson.value)tasks=tasks.filter(t=>t.person===filterPerson.value);if(viewMode.value==="assign")tasks.sort((a,b)=>peopleNames().indexOf(a.person)-peopleNames().indexOf(b.person));tasks.forEach(t=>day.appendChild(taskEl(t,d)));if(canEdit){const add=document.createElement("div");add.className="add";add.textContent="+ Add task";add.onclick=()=>openAddTask(d);day.appendChild(add);day.ondragover=e=>e.preventDefault();day.ondrop=()=>dropToOtherDay(d)}calendar.appendChild(day)}}
+function taskEl(t,d){const el=document.createElement("div");el.className="task"+(t.done?" done":"");el.style.background=personColor(t.person);el.draggable=canEdit;el.ondragstart=()=>{dragTask=t;dragFromDay=d;dragFromIndex=cache[d].indexOf(t)};el.ondragover=e=>canEdit&&e.preventDefault();el.ondrop=e=>{e.preventDefault();reorderInDay(d,t)};if(canEdit)el.onclick=()=>toggleDone(t);el.innerHTML=`<div class="tt">${esc(t.text)}</div><div class="tm">${esc(t.person)} • ${esc(t.type)} (AM: ${esc(t.am||"N/A")})</div>`;if(canEdit){const a=document.createElement("div");a.className="act";a.innerHTML=`<button class="mini">✏</button><button class="mini">📋</button><button class="mini">✖</button>`;a.children[0].onclick=e=>{e.stopPropagation();openEditTask(t,d)};a.children[1].onclick=e=>{e.stopPropagation();navigator.clipboard.writeText(t.text);toast("Copied","#2e7d32")};a.children[2].onclick=e=>{e.stopPropagation();removeTask(t.id)};el.appendChild(a)}return el}
+function openAddTask(d){selectedDay=d;editingTask=null;refreshDropdowns();taskModalTitle.textContent="Add task";taskText.value="";taskPerson.value=peopleNames()[0]||"Allen";taskType.value=TYPES[0];taskAM.value="None";taskPriority.value="Normal";taskNote.value="";openModal("taskModal")}
+function openEditTask(t,d){selectedDay=d;editingTask=t;refreshDropdowns(t.am||"None");taskModalTitle.textContent="Edit task";taskText.value=t.text;taskPerson.value=t.person;taskType.value=t.type;taskAM.value=t.am||"None";taskPriority.value=t.priority||"Normal";taskNote.value=t.note||"";openModal("taskModal")}
+async function saveTaskFromModal(){if(!requireDb()||!canEdit||!selectedDay)return;const task_date=formatDate(current.getFullYear(),current.getMonth(),selectedDay);const p={text:taskText.value.trim(),person:taskPerson.value,type:taskType.value,am:taskAM.value||"None",priority:taskPriority.value,note:taskNote.value||null};if(!p.text){toast("Empty task","#b71c1c");return}let error,taskId=editingTask?.id||null;if(editingTask){({error}=await supabaseClient.from("tasks").update(p).eq("id",editingTask.id));await logAction("update",editingTask.id,editingTask.source_id||"",p.text,p.person,"Updated task",p.am)}else{const res=await supabaseClient.from("tasks").insert({...p,task_date,done:false,sort_order:(cache[selectedDay]?.length||0)}).select("id").single();error=res.error;taskId=res.data?.id;await logAction("manual_add",taskId,"",p.text,p.person,"Manual add",p.am)}if(error){toast(error.message,"#b71c1c");return}const personM=memberByName(p.person),amM=memberByName(p.am);await sendTelegram({event:editingTask?"update":"new",person:p.person,person_chat_id:personM?.telegram_chat_id||"",am:p.am,am_chat_id:amM?.telegram_chat_id||"",type:p.type,message:`Project: ${p.text}\nType: ${p.type}\n\nMember: ${p.person}\nAM: ${p.am}\n📅 ${task_date}`});closeModal("taskModal");toast("Saved","#2e7d32");await render()}
+async function toggleDone(t){if(!requireDb()||!canEdit)return;t.done=!t.done;renderCalendarOnly();const {error}=await supabaseClient.from("tasks").update({done:t.done}).eq("id",t.id);if(error){toast(error.message,"#b71c1c");return}await logAction(t.done?"done":"undone",t.id,t.source_id||"",t.text,t.person,"Toggle done",t.am);if(t.done){const personM=memberByName(t.person),amM=memberByName(t.am);await sendTelegram({event:"done",person:t.person,person_chat_id:personM?.telegram_chat_id||"",am:t.am,am_chat_id:amM?.telegram_chat_id||"",message:`✅ Completed\n${t.text}`})}}
+async function removeTask(id){if(!requireDb()||!canEdit)return;const {data:task,error:readErr}=await supabaseClient.from("tasks").select("id,source_id,text,person,am").eq("id",id).single();if(readErr){toast("Lỗi đọc task: "+readErr.message,"#b71c1c");return}const {error:delErr}=await supabaseClient.from("tasks").delete().eq("id",id);if(delErr){toast(delErr.message,"#b71c1c");return}if(task?.source_id){const {error:qErr}=await supabaseClient.from("task_queue").update({queue_status:"NEW",assigned_person:null,assigned_date:null,priority:"Normal",is_current:true,updated_at:new Date().toISOString()}).eq("source_id",task.source_id);if(qErr){toast("Đã xóa nhưng lỗi trả queue: "+qErr.message,"#b71c1c")}}await logAction("delete",id,task?.source_id||"",task?.text||"",task?.person||"","Deleted task and returned queue",task?.am||"");const personM=memberByName(task?.person),amM=memberByName(task?.am);await sendTelegram({event:"delete",person:task?.person||"",person_chat_id:personM?.telegram_chat_id||"",am:task?.am||"",am_chat_id:amM?.telegram_chat_id||"",message:`Project: ${task?.text||""}`});toast("Đã xóa task và trả về queue","#2e7d32");await Promise.all([loadQueue(),render()])}
+async function reorderInDay(day,target){if(!dragTask||day!==dragFromDay)return;const list=cache[day],from=dragFromIndex,to=list.indexOf(target);if(from===to)return;list.splice(from,1);list.splice(to,0,dragTask);list.forEach((t,i)=>t.sort_order=i);renderCalendarOnly();await Promise.all(list.map(t=>supabaseClient.from("tasks").update({sort_order:t.sort_order}).eq("id",t.id)));dragTask=null}
+async function dropToOtherDay(day){if(!dragTask||day===dragFromDay)return;cache[dragFromDay]=cache[dragFromDay].filter(t=>t!==dragTask);dragTask.task_date=formatDate(current.getFullYear(),current.getMonth(),day);(cache[day]??=[]).push(dragTask);cache[day].forEach((t,i)=>t.sort_order=i);renderCalendarOnly();await supabaseClient.from("tasks").update({task_date:dragTask.task_date,sort_order:cache[day].indexOf(dragTask)}).eq("id",dragTask.id);await logAction("move",dragTask.id,dragTask.source_id||"",dragTask.text,dragTask.person,`Moved to ${dragTask.task_date}`,dragTask.am);const personM=memberByName(dragTask.person),amM=memberByName(dragTask.am);await sendTelegram({event:"move",person:dragTask.person,person_chat_id:personM?.telegram_chat_id||"",am:dragTask.am,am_chat_id:amM?.telegram_chat_id||"",message:`Project: ${dragTask.text}\n\n📅 New Date: ${dragTask.task_date}`});dragTask=null}
+function changeMonth(n){current.setMonth(current.getMonth()+n);render()}
+
+function renderWorkload(){const date=workloadDate.value||todayStr(),tasks=Object.values(cache).flat(),byD={},byM={};webMembers().forEach(m=>{byD[m.name]={count:0,points:0,max:m.max_per_day||999};byM[m.name]={total:0,done:0,pending:0}});tasks.forEach(t=>{const pkg=t.package_name||pkgFromId(t.source_id);if(t.task_date===date&&byD[t.person]){byD[t.person].count++;byD[t.person].points+=pointFor(pkg,t.priority)}if(byM[t.person]){byM[t.person].total++;t.done?byM[t.person].done++:byM[t.person].pending++}});workloadDayBody.innerHTML=webMembers().map(m=>{const v=byD[m.name];const lab=v.count>=v.max?'<span class="badge urgent">Quá tải</span>':v.points>=1.8?'<span class="badge pending">Hơi tải</span>':'<span class="badge assigned">OK</span>';return`<tr><td><b>${esc(m.name)}</b></td><td>${v.count}/${v.max}</td><td>${v.points.toFixed(1)}</td><td>${lab}</td></tr>`}).join("");workloadMonthBody.innerHTML=webMembers().map(m=>{const v=byM[m.name];return`<tr><td><b>${esc(m.name)}</b></td><td>${v.total}</td><td>${v.done}</td><td>${v.pending}</td></tr>`}).join("")}
+function renderReport(){const tasks=Object.values(cache).flat();reportTotal.textContent=tasks.length;reportDone.textContent=tasks.filter(t=>t.done).length;reportPending.textContent=tasks.filter(t=>!t.done).length;const bt={},bp={};tasks.forEach(t=>{bt[t.type]=(bt[t.type]||0)+1;bp[t.person]=(bp[t.person]||0)+1});reportByType.innerHTML=Object.keys(bt).sort().map(k=>`<div style="display:flex;justify-content:space-between;margin:7px 0"><span>${esc(k)}</span><b>${bt[k]}</b></div>`).join("")||'<span class="muted">No data</span>';reportByPerson.innerHTML=webMembers().map(m=>`<div style="display:flex;justify-content:space-between;margin:7px 0"><span>${esc(m.name)}</span><b>${bp[m.name]||0}</b></div>`).join("")}
+function openModal(id){document.getElementById(id).classList.add("open")}
+function closeModal(id){document.getElementById(id).classList.remove("open")}
+function closeModalOnBg(e,id){if(e.target.id===id)closeModal(id)}
+
+initClient();
+setupUi();
+(async()=>{if(supabaseClient){await loadMembers();await render();await loadQueue();supabaseClient.channel("tasks-rt").on("postgres_changes",{event:"*",schema:"public",table:"tasks"},render).on("postgres_changes",{event:"*",schema:"public",table:"task_queue"},loadQueue).on("postgres_changes",{event:"*",schema:"public",table:"members"},loadMembers).subscribe()}else{members=FALLBACK_MEMBERS;refreshDropdowns();toast("Vào Setup để cấu hình Supabase","#8a6d00")}})();
+</script>
 </body>
-
 </html>
