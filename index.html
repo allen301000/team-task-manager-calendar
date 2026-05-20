@@ -823,6 +823,8 @@ create index if not exists tasks_task_date_idx on public.tasks(task_date);</text
       return d.toISOString().slice(0, 10);
     }
     function pkgFromId(id) { const s = String(id || "").trim(); if (s.includes("*")) return "Gói Custom"; const c = s.charAt(5); if (c === "0") return "Gói Menu + QR"; if (/[123]/.test(c)) return "Gói Custom"; return { S: "Gói S", P: "Gói P", G: "Gói G", F: "Gói F" }[c] || "Gói Custom" }
+    function normalizeProjectKey(project) { const text = String(project || "").trim().toUpperCase(); return text.replace(/&/g, " AND ").replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").replace(/-+/g, "-"); }
+    function sourceIdFromProject(project, fallback) { const key = normalizeProjectKey(project); if (key) return key; return String(fallback || "").trim(); }
     function pointFor(pkg, pri = "Normal") { let p = PACKAGE_POINTS[pkg] || 1; if (pri === "Urgent") p += .5; if (pri === "High") p += .25; return p }
     function requireDb() { if (!supabaseClient) { toast("Chưa cấu hình Supabase trong Setup", "#b71c1c"); return false } return true }
     function initClient() { if (settings.supabaseUrl && settings.supabaseKey) supabaseClient = supabase.createClient(settings.supabaseUrl, settings.supabaseKey) }
@@ -836,146 +838,11 @@ create index if not exists tasks_task_date_idx on public.tasks(task_date);</text
     function renderQueueFilters() { const cur = queuePackageFilter.value; const ps = [...new Set(queueRows.map(r => r.package_name || pkgFromId(r.source_id)).filter(Boolean))].sort(); queuePackageFilter.innerHTML = '<option value="">Tất cả gói</option>' + ps.map(p => `<option>${esc(p)}</option>`).join(""); queuePackageFilter.value = cur }
     function renderQueueKpis() { kpiNew.textContent = queueRows.filter(r => (r.queue_status || "NEW") === "NEW").length; kpiAssigned.textContent = queueRows.filter(r => r.queue_status === "ASSIGNED").length; kpiPending.textContent = queueRows.filter(r => r.queue_status === "PENDING_INFO").length; kpiToday.textContent = Object.values(cache).flat().filter(t => t.task_date === todayStr()).length }
     function renderQueue() { const st = queueStatusFilter.value, pkg = queuePackageFilter.value, q = queueSearch.value.trim().toLowerCase(); let rows = [...queueRows]; if (st !== "ALL") rows = rows.filter(r => (r.queue_status || "NEW") === st); if (pkg) rows = rows.filter(r => (r.package_name || pkgFromId(r.source_id)) === pkg); if (q) rows = rows.filter(r => [r.source_id, r.project, r.am, r.package_name].join(" ").toLowerCase().includes(q)); queueBody.innerHTML = rows.map(r => { const st = r.queue_status || "NEW", pn = r.package_name || pkgFromId(r.source_id); return `<tr><td><b>${esc(r.source_id)}</b></td><td><b>${esc(r.project)}</b><div class="muted">${esc(r.note || "")}</div></td><td>${esc(r.am || "")}</td><td>${esc(r.start_date || "")}</td><td>${esc(r.expired_date || "")}</td><td><span class="badge">${esc(pn)}</span></td><td>${r.template_url ? `<a href="${esc(r.template_url)}" target="_blank">Open</a>` : ""}</td><td>${r.layout_url ? `<a href="${esc(r.layout_url)}" target="_blank">Open</a>` : ""}</td><td><span class="badge ${st === "ASSIGNED" ? "assigned" : st === "PENDING_INFO" ? "pending" : st === "SKIPPED" ? "warn" : "new"}">${esc(st)}</span></td><td><button class="primary" onclick='openAssign("${String(r.source_id).replace(/"/g, "&quot;")}")'>Assign</button> <button class="ghost" onclick='skipQueue("${String(r.source_id).replace(/"/g, "&quot;")}")'>Skip</button></td></tr>` }).join("") }
-    async function syncQueueFromApi() {
-      clearDebug();
-      console.group("[Task Queue] Sync từ Sheet API");
-      logDebug("[Task Queue] Sync từ Sheet API");
-      logDebug("Settings", {
-        hasSupabaseClient: !!supabaseClient,
-        sheetApi: settings.sheetApi,
-        supabaseUrl: settings.supabaseUrl,
-        hasSupabaseKey: !!settings.supabaseKey
-      });
-
-      if (!requireDb()) {
-        console.groupEnd();
-        return;
-      }
-
-      if (!settings.sheetApi) {
-        toast("Chưa nhập Apps Script API URL trong Setup", "#b71c1c");
-        logDebug("ERROR", "Chưa nhập Apps Script API URL trong Setup");
-        console.groupEnd();
-        return;
-      }
-
-      try {
-        toast("Đang sync từ Sheet...", "#f05a28");
-
-        const json = await loadSheetQueueJsonp(settings.sheetApi);
-        logDebug("Raw API response", json);
-
-        if (!json) {
-          throw new Error("Apps Script API không trả dữ liệu.");
-        }
-
-        if (json.success === false) {
-          throw new Error(json.error || "Apps Script API trả success=false.");
-        }
-
-        const rows = Array.isArray(json) ? json : (json.data || []);
-        logDebug("Rows parsed", {
-          total: rows.length,
-          firstFive: rows.slice(0, 5)
-        });
-
-        const usedIds = new Map();
-
-        let payload = rows.map((r, index) => {
-          const project = String(r.project || r.Project || r.Projects || "").trim();
-          const rowNumber = String(r.row_number || r.row || index + 1).trim();
-
-          let sourceId = String(
-            r.source_id ||
-            r.SourceID ||
-            r.SIT ||
-            r.sit ||
-            r.Web ||
-            r.web ||
-            r.STT ||
-            r.stt ||
-            ""
-          ).trim();
-
-          if (!sourceId) {
-            const projectSlug = project
-              .replace(/[^\w\s-]/g, "")
-              .replace(/\s+/g, "-")
-              .slice(0, 40);
-            sourceId = `ROW-${rowNumber}-${projectSlug}`;
-          }
-
-          const baseSourceId = sourceId;
-
-          // Chống lỗi Supabase: ON CONFLICT DO UPDATE command cannot affect row a second time.
-          // Nếu API trả nhiều dòng trùng source_id trong cùng một lần sync, tự thêm ROW để vẫn giữ đủ task.
-          if (usedIds.has(sourceId)) {
-            const duplicatedCount = usedIds.get(sourceId) + 1;
-            usedIds.set(sourceId, duplicatedCount);
-            sourceId = `${baseSourceId}-ROW-${rowNumber}`;
-            logDebug("Duplicate source_id fixed", {
-              original: baseSourceId,
-              new_source_id: sourceId,
-              row_number: rowNumber,
-              project
-            });
-          } else {
-            usedIds.set(sourceId, 1);
-          }
-
-          return {
-            source_id: sourceId,
-            project: project,
-            am: String(r.am || r.AM || "").trim(),
-            start_date: toDateInput(r.start || r.Start || r.start_date),
-            expired_date: toDateInput(r.expired || r.Expired || r.expired_date),
-            template_url: String(r.template || r.template_url || r["Template màu"] || "").trim(),
-            layout_url: String(r.layout || r.layout_url || r["Layout web"] || "").trim(),
-            package_name: r.package_name || pkgFromId(sourceId),
-            source_status: r.status || r.Status || "Doing",
-            queue_status: "NEW",
-            source_row: rowNumber || null,
-            note: String(r.note || r.Note || "").trim() || null
-          };
-        }).filter(r => r.source_id && r.project);
-
-        logDebug("Payload to Supabase", {
-          total: payload.length,
-          firstFive: payload.slice(0, 5)
-        });
-
-        if (!payload.length) {
-          toast("API không có task hợp lệ", "#8a6d00");
-          logDebug("WARN", "API có data nhưng không có dòng hợp lệ để sync vào Supabase.");
-          console.groupEnd();
-          return;
-        }
-
-        const { data, error } = await supabaseClient
-          .from("task_queue")
-          .upsert(payload, {
-            onConflict: "source_id",
-            ignoreDuplicates: false
-          })
-          .select();
-
-        logDebug("Supabase upsert result", {
-          count: data ? data.length : 0,
-          error
-        });
-
-        if (error) throw error;
-
-        toast(`Đã sync ${payload.length} task vào queue`, "#2e7d32");
-        await loadQueue();
-      } catch (e) {
-        console.error(e);
-        logDebug("SYNC ERROR", e.message || e);
-        toast("Sync lỗi: " + (e.message || e), "#b71c1c");
-      } finally {
-        console.groupEnd();
-      }
-    }
+    async function syncQueueFromApi() { clearDebug(); console.group("[Task Queue] Sync từ Sheet API"); logDebug("[Task Queue] Sync từ Sheet API"); logDebug("Settings", { hasSupabaseClient: !!supabaseClient, sheetApi: settings.sheetApi, supabaseUrl: settings.supabaseUrl, hasSupabaseKey: !!settings.supabaseKey }); if (!requireDb()) { console.groupEnd(); return } if (!settings.sheetApi) { toast("Chưa nhập Apps Script API URL trong Setup", "#b71c1c"); console.groupEnd(); return } try { toast("Đang sync từ Sheet...", "#f05a28"); const json = await loadSheetQueueJsonp(settings.sheetApi); logDebug("Raw API response", json); if (!json) throw new Error("Apps Script API không trả dữ liệu."); if (json.success === false) throw new Error(json.error || "Apps Script API trả success=false."); const rows = Array.isArray(json) ? json : (json.data || []); logDebug("Rows parsed", { total: rows.length, firstFive: rows.slice(0, 5) }); 
+    let payload = rows.map((r, index) => { const project = String(r.project || r.Project || r.Projects || "").trim(); const fallbackId = r.source_id || r.SourceID || r.SIT || r.sit || r.Web || r.web || r.STT || r.stt || r.row_number || index + 1; const sourceId = sourceIdFromProject(project, fallbackId); return { source_id: sourceId, project, am: String(r.am || r.AM || "").trim(), start_date: toDateInput(r.start || r.Start || r.start_date), expired_date: toDateInput(r.expired || r.Expired || r.expired_date), template_url: String(r.template || r.template_url || r["Template màu"] || "").trim(), layout_url: String(r.layout || r.layout_url || r["Layout web"] || "").trim(), package_name: r.package_name || pkgFromId(r.source_id || r.SIT || r.sit || project), source_status: r.status || r.Status || "Doing", queue_status: "NEW", source_row: r.row_number ? String(r.row_number) : null, note: r.note || r.Note || null }; }).filter(r => r.source_id && r.project);
+      const seenProjectKeys = new Set();
+      payload = payload.filter(item => { const key = normalizeProjectKey(item.project); if (seenProjectKeys.has(key)) { logDebug("Duplicate full project skipped", item.project); console.warn("Duplicate full project skipped:", item.project, item); return false; } seenProjectKeys.add(key); return true; });
+      logDebug("Payload to Supabase", { total: payload.length, firstFive: payload.slice(0, 5) }); if (!payload.length) { toast("API không có task hợp lệ", "#8a6d00"); return } const { data, error } = await supabaseClient.from("task_queue").upsert(payload, { onConflict: "source_id", ignoreDuplicates: false }).select(); logDebug("Supabase upsert result", { count: data ? data.length : 0, error }); if (error) throw error; toast(`Đã sync ${payload.length} task vào queue`, "#2e7d32"); await loadQueue() } catch (e) { console.error(e); logDebug("SYNC ERROR", e.message || e); toast("Sync lỗi: " + (e.message || e), "#b71c1c") } finally { console.groupEnd() } }
     function loadSheetQueueJsonp(apiUrl) { return new Promise((resolve, reject) => { const cb = "sheetQueueCb_" + Date.now() + "_" + Math.floor(Math.random() * 100000); const sep = apiUrl.includes("?") ? "&" : "?"; const url = `${apiUrl}${sep}action=queue&callback=${cb}`; logDebug("JSONP callback name", cb); logDebug("JSONP request URL", url); const s = document.createElement("script"); const timer = setTimeout(() => { cleanup(); reject(new Error("Sheet API timeout sau 20s. Kiểm tra Apps Script URL / deploy / quyền.")) }, 20000); function cleanup() { clearTimeout(timer); delete window[cb]; if (s.parentNode) s.parentNode.removeChild(s) } window[cb] = data => { logDebug("JSONP callback received", data); cleanup(); resolve(data) }; s.onerror = () => { cleanup(); reject(new Error("Không load được Apps Script API. Copy JSONP request URL mở trực tiếp trên browser để xem lỗi.")) }; s.onload = () => logDebug("JSONP script loaded. Nếu không thấy callback received thì Apps Script chưa trả đúng callback(...). "); s.src = url; document.body.appendChild(s) }) }
     async function skipQueue(id) { if (!requireDb()) return; const { error } = await supabaseClient.from("task_queue").update({ queue_status: "SKIPPED", updated_at: new Date().toISOString() }).eq("source_id", id); if (error) { toast(error.message, "#b71c1c"); return } await loadQueue() }
     function openAssign(id) { selectedQueue = queueRows.find(r => r.source_id === id); if (!selectedQueue) return; assignTitle.textContent = "Assign — " + selectedQueue.source_id; assignText.value = `${selectedQueue.source_id} ${selectedQueue.project}`; assignAM.value = selectedQueue.am || "None"; assignDate.value = selectedQueue.expired_date || todayStr(); assignType.value = inferType(selectedQueue); assignPriority.value = "Normal"; assignPerson.value = suggestPerson(assignDate.value); assignNote.value = selectedQueue.note || ""; openModal("assignModal") }
