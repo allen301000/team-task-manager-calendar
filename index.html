@@ -444,8 +444,6 @@ function toggleQueueCheckAll(checked){
 
 function extractProjectCode(project){
   return String(project||"").trim();
-})\b/i);
-  return m?m[1].toUpperCase():text.split(/\s+/)[0]||"";
 }
 
 async function notifyManualDomain(){
