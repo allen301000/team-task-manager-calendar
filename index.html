@@ -454,13 +454,55 @@ async function openAssign(id){
   openModal("assignModal");
 }
 function inferType(r){const t=String(r.template_url||"").trim(),l=String(r.layout_url||"").trim();if(t&&l)return"Design + QR";if(t)return"Design";if(l)return"Menu + QR";return"Design + QR"}
-function suggestPerson(date){const by=getTasksByPersonForDate(date);let best=peopleNames()[0]||"Allen",min=Infinity;webMembers().forEach(m=>{const n=by[m.name]||0;const max=m.max_per_day||999;const score=n>=max?9999:n;if(score<min){min=score;best=m.name}});return best}
-function getTasksByPersonForDate(date){const by={}
+function suggestPerson(date){
+  const by=getTasksByPersonForDate(date);
+  let best=peopleNames()[0]||"Allen";
+  let min=Infinity;
+
+  webMembers().forEach(m=>{
+    const n=by[m.name]||0;
+    const max=m.max_per_day||999;
+    const score=n>=max?9999:n;
+
+    if(score<min){
+      min=score;
+      best=m.name;
+    }
+  });
+
+  return best;
+}
+
+function getTasksByPersonForDate(date){
+  const by={};
+
+  Object
+    .values(cache)
+    .flat()
+    .filter(t=>t.task_date===date)
+    .forEach(t=>{
+      by[t.person]=(by[t.person]||0)+1;
+    });
+
+  return by;
+}
+
 async function getNextAssignSlot(){
-  if(!requireDb())return {date:todayStr(),person:peopleNames()[0]||"Tony"};
+  if(!requireDb()){
+    return {
+      date:todayStr(),
+      person:peopleNames()[0]||"Tony"
+    };
+  }
 
   const team=webMembers();
-  if(!team.length)return {date:todayStr(),person:"Tony"};
+
+  if(!team.length){
+    return {
+      date:todayStr(),
+      person:"Tony"
+    };
+  }
 
   const orderedNames=team.map(m=>m.name);
   const today=todayStr();
@@ -474,33 +516,58 @@ async function getNextAssignSlot(){
 
   if(error){
     console.warn("getNextAssignSlot error",error);
-    return {date:today,person:orderedNames[0]};
+
+    return {
+      date:today,
+      person:orderedNames[0]
+    };
   }
 
   if(!data||!data.length){
-    return {date:today,person:orderedNames[0]};
+    return {
+      date:today,
+      person:orderedNames[0]
+    };
   }
 
   let latestDate=data[0].task_date;
-  if(latestDate<today)latestDate=today;
 
-  const assigned=data.filter(t=>t.task_date===latestDate).map(t=>t.person);
+  // Không tự assign về ngày quá khứ
+  if(latestDate<today){
+    latestDate=today;
+  }
+
+  const assigned=data
+    .filter(t=>t.task_date===latestDate)
+    .map(t=>t.person);
+
   let maxIndex=-1;
 
   assigned.forEach(person=>{
     const idx=orderedNames.indexOf(person);
-    if(idx>maxIndex)maxIndex=idx;
+
+    if(idx>maxIndex){
+      maxIndex=idx;
+    }
   });
 
+  // Nếu ngày mới nhất chưa đủ vòng team thì lấy người tiếp theo theo Sort ID
   if(maxIndex<orderedNames.length-1){
-    return {date:latestDate,person:orderedNames[maxIndex+1]};
+    return {
+      date:latestDate,
+      person:orderedNames[maxIndex+1]
+    };
   }
 
+  // Nếu ngày đó đã đủ team thì qua ngày tiếp theo, quay lại người đầu tiên
   const nextDate=new Date(latestDate+"T00:00:00");
   nextDate.setDate(nextDate.getDate()+1);
 
-  return {date:nextDate.toISOString().slice(0,10),person:orderedNames[0]};
-};Object.values(cache).flat().filter(t=>t.task_date===date).forEach(t=>by[t.person]=(by[t.person]||0)+1);return by}
+  return {
+    date:nextDate.toISOString().slice(0,10),
+    person:orderedNames[0]
+  };
+}
 
 async function assignQueueTask(){if(!requireDb()||!selectedQueue)return;const person=assignPerson.value,taskDate=assignDate.value,type=assignType.value,am=assignAM.value||"None",text=assignText.value.trim();if(!text||!person||!taskDate||!type){toast("Thiếu thông tin assign","#b71c1c");return}const sourceId=selectedQueue.source_id;const webMember=memberByName(person),amMember=memberByName(am);const payload={source_id:sourceId,task_date:taskDate,text,person,type,am,done:false,sort_order:999,priority:assignPriority.value,package_name:selectedQueue.package_name||pkgFromId(sourceId),note:assignNote.value||null};let taskId=null;const {data:exist,error:checkErr}=await supabaseClient.from("tasks").select("id").eq("source_id",sourceId).limit(1);if(checkErr){toast("Lỗi check task: "+checkErr.message,"#b71c1c");return}if(exist&&exist.length){taskId=exist[0].id;const {error}=await supabaseClient.from("tasks").update(payload).eq("id",taskId);if(error){toast("Lỗi update task: "+error.message,"#b71c1c");return}}else{const {data,error}=await supabaseClient.from("tasks").insert(payload).select("id").single();if(error){toast("Lỗi insert task: "+error.message,"#b71c1c");return}taskId=data?.id||null}const {error:qErr}=await supabaseClient.from("task_queue").update({queue_status:"ASSIGNED",assigned_person:person,assigned_date:taskDate,priority:assignPriority.value,updated_at:new Date().toISOString()}).eq("source_id",sourceId);if(qErr){toast("Task đã add nhưng lỗi update queue: "+qErr.message,"#b71c1c");return}const msg=`Project: ${text}\nType: ${type}\n\nMember: ${person}\nAM: ${am}\n📅 ${taskDate}`;await sendTelegram({event:"new",person,person_chat_id:webMember?.telegram_chat_id||"",am,am_chat_id:amMember?.telegram_chat_id||"",type,message:msg});await logAction("assign",taskId,sourceId,text,person,`Assigned to ${person} / AM ${am}`,am);closeModal("assignModal");toast("Đã add vào calendar","#2e7d32");const d=new Date(taskDate+"T00:00:00");if(!isNaN(d.getTime()))current=d;await Promise.all([loadQueue(),render()]);showPage("calendar")}
 async function markQueuePending(){if(!requireDb()||!selectedQueue)return;await supabaseClient.from("task_queue").update({queue_status:"PENDING_INFO",updated_at:new Date().toISOString()}).eq("source_id",selectedQueue.source_id);closeModal("assignModal");await loadQueue()}
