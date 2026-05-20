@@ -1043,7 +1043,7 @@ create index if not exists tasks_task_date_idx on public.tasks(task_date);</text
     function inferType(r) { const t = String(r.template_url || "").trim(), l = String(r.layout_url || "").trim(); if (t && l) return "Design + QR"; if (t) return "Design"; if (l) return "Menu + QR"; return "Design + QR" }
     function suggestPerson(date) { const by = getTasksByPersonForDate(date); let best = PEOPLE_ORDER[0], min = Infinity; PEOPLE_ORDER.forEach(p => { const n = by[p] || 0; if (n < min) { min = n; best = p } }); return best }
     function getTasksByPersonForDate(date) { const by = {}; Object.values(cache).flat().filter(t => t.task_date === date).forEach(t => by[t.person] = (by[t.person] || 0) + 1); return by }
-   async function assignQueueTask() {
+async function assignQueueTask() {
   if (!requireDb() || !selectedQueue) return;
 
   const person = assignPerson.value;
@@ -1075,7 +1075,6 @@ create index if not exists tasks_task_date_idx on public.tasks(task_date);</text
 
   let taskId = null;
 
-  // 1. Check task đã tồn tại theo source_id chưa
   const { data: existingTasks, error: checkError } = await supabaseClient
     .from("tasks")
     .select("id")
@@ -1088,7 +1087,6 @@ create index if not exists tasks_task_date_idx on public.tasks(task_date);</text
     return;
   }
 
-  // 2. Nếu đã có thì update
   if (existingTasks && existingTasks.length > 0) {
     taskId = existingTasks[0].id;
 
@@ -1104,7 +1102,6 @@ create index if not exists tasks_task_date_idx on public.tasks(task_date);</text
     }
 
   } else {
-    // 3. Nếu chưa có thì insert mới
     const { data: insertedTask, error: insertError } = await supabaseClient
       .from("tasks")
       .insert(payload)
@@ -1120,12 +1117,14 @@ create index if not exists tasks_task_date_idx on public.tasks(task_date);</text
     taskId = insertedTask?.id || null;
   }
 
-  // 4. Update lại task_queue thành ASSIGNED
+  /**
+   * Không update assigned_task_id vì cột này đang là UUID
+   * trong khi tasks.id của bạn là số như 729.
+   */
   const { error: queueError } = await supabaseClient
     .from("task_queue")
     .update({
       queue_status: "ASSIGNED",
-      assigned_task_id: taskId,
       assigned_person: person,
       assigned_date: taskDate,
       priority: assignPriority.value,
