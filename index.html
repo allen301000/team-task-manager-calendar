@@ -209,13 +209,27 @@
 
     <section id="page-members" class="hidden">
       <div class="top">
-        <div><h2>👤 Members / AM</h2><div class="sub">Quản lý người làm web, AM và Telegram ID ngay trong Task Manager.</div></div>
+        <div><h2>👤 Members / AM</h2><div class="sub">Quản lý người làm web, AM, Sort ID và Telegram ID ngay trong Task Manager.</div></div>
         <div class="tools"><button class="primary" onclick="openMemberModal()">+ Add member/AM</button><button onclick="loadMembers()">Reload</button></div>
       </div>
       <div class="card">
+        <div class="tools" style="margin-bottom:10px">
+          <select id="memberRoleFilter" onchange="renderMembers()">
+            <option value="ALL">Tất cả role</option>
+            <option value="WEB">Web</option>
+            <option value="AM">AM</option>
+            <option value="BOTH">Both</option>
+          </select>
+          <select id="memberActiveFilter" onchange="renderMembers()">
+            <option value="ACTIVE">Đang active</option>
+            <option value="ALL">Tất cả trạng thái</option>
+            <option value="INACTIVE">Inactive</option>
+          </select>
+          <input id="memberSearch" placeholder="Tìm name / telegram id..." oninput="renderMembers()" style="max-width:340px">
+        </div>
         <div class="wrap">
           <table>
-            <thead><tr><th>Name</th><th>Role</th><th>Telegram Chat ID</th><th>Max/day</th><th>Active</th><th>Color</th><th>Action</th></tr></thead>
+            <thead><tr><th>Sort</th><th>Name</th><th>Role</th><th>Telegram Chat ID</th><th>Max/day</th><th>Active</th><th>Color</th><th>Action</th></tr></thead>
             <tbody id="membersBody"></tbody>
           </table>
         </div>
@@ -286,6 +300,7 @@
       <div class="field"><label>Role</label><select id="memberRole"><option>WEB</option><option>AM</option><option>BOTH</option></select></div>
       <div class="field"><label>Telegram Chat ID</label><input id="memberTelegram"></div>
       <div class="field"><label>Max task/day</label><input id="memberMaxDay" type="number" min="0" step="1"></div>
+      <div class="field"><label>Sort ID</label><input id="memberSortOrder" type="number" min="1" step="1"></div>
       <div class="field"><label>Color</label><input id="memberColor" type="color"></div>
       <div class="field"><label>Active</label><select id="memberActive"><option value="true">Active</option><option value="false">Inactive</option></select></div>
     </div>
@@ -300,15 +315,15 @@ const DEFAULTS={editCode:"TEAM2026",supabaseUrl:"",supabaseKey:"",sheetApi:"",te
 const TYPES=["Design + QR","Design","Menu + QR","Menu","QR"];
 const PACKAGE_POINTS={"Gói S":1,"Gói P":1,"Gói G":1.2,"Gói F":1.2,"Gói Menu + QR":1.5,"Gói Custom":2};
 const FALLBACK_MEMBERS=[
-  {name:"Tony",role:"WEB",telegram_chat_id:"1767769751",active:true,color:"#ff8a80",max_per_day:6},
-  {name:"Alex",role:"WEB",telegram_chat_id:"1420324274",active:true,color:"#ffe082",max_per_day:6},
-  {name:"Lucas",role:"WEB",telegram_chat_id:"8314965256",active:true,color:"#b0bec5",max_per_day:6},
-  {name:"Allen",role:"WEB",telegram_chat_id:"843310853",active:true,color:"#90caf9",max_per_day:6},
-  {name:"Hayden",role:"WEB",telegram_chat_id:"1674652037",active:true,color:"#f48fb1",max_per_day:6},
-  {name:"Leo",role:"WEB",telegram_chat_id:"6196989586",active:true,color:"#ce93d8",max_per_day:6},
-  {name:"Dante",role:"WEB",telegram_chat_id:"7359430356",active:true,color:"#a5d6a7",max_per_day:6},
-  {name:"Nancy",role:"AM",telegram_chat_id:"1919440686",active:true,color:"#f05a28",max_per_day:0},
-  {name:"Rosie",role:"AM",telegram_chat_id:"7761061776",active:true,color:"#f05a28",max_per_day:0}
+  {name:"Tony",role:"WEB",telegram_chat_id:"1767769751",active:true,color:"#ff8a80",max_per_day:6,sort_order:1},
+  {name:"Alex",role:"WEB",telegram_chat_id:"1420324274",active:true,color:"#ffe082",max_per_day:6,sort_order:2},
+  {name:"Lucas",role:"WEB",telegram_chat_id:"8314965256",active:true,color:"#b0bec5",max_per_day:6,sort_order:3},
+  {name:"Allen",role:"WEB",telegram_chat_id:"843310853",active:true,color:"#90caf9",max_per_day:6,sort_order:4},
+  {name:"Hayden",role:"WEB",telegram_chat_id:"1674652037",active:true,color:"#f48fb1",max_per_day:6,sort_order:5},
+  {name:"Leo",role:"WEB",telegram_chat_id:"6196989586",active:true,color:"#ce93d8",max_per_day:6,sort_order:6},
+  {name:"Dante",role:"WEB",telegram_chat_id:"7359430356",active:true,color:"#a5d6a7",max_per_day:6,sort_order:7},
+  {name:"Nancy",role:"AM",telegram_chat_id:"1919440686",active:true,color:"#f05a28",max_per_day:0,sort_order:999},
+  {name:"Rosie",role:"AM",telegram_chat_id:"7761061776",active:true,color:"#f05a28",max_per_day:0,sort_order:999}
 ];
 
 let settings={...DEFAULTS,...JSON.parse(localStorage.getItem("tm_settings")||"{}")};
@@ -328,8 +343,26 @@ function pkgFromId(id){const s=String(id||"").trim();if(s.includes("*"))return"G
 function pointFor(pkg,pri="Normal"){let p=PACKAGE_POINTS[pkg]||1;if(pri==="Urgent")p+=.5;if(pri==="High")p+=.25;return p}
 function requireDb(){if(!supabaseClient){toast("Chưa cấu hình Supabase trong Setup","#b71c1c");return false}return true}
 function initClient(){if(settings.supabaseUrl&&settings.supabaseKey)supabaseClient=supabase.createClient(settings.supabaseUrl,settings.supabaseKey)}
-function webMembers(){return members.filter(m=>m.active!==false&&(m.role==="WEB"||m.role==="BOTH"))}
-function amMembers(){return members.filter(m=>m.active!==false&&(m.role==="AM"||m.role==="BOTH"))}
+function webMembers(){
+  return members
+    .filter(m=>m.active!==false&&(m.role==="WEB"||m.role==="BOTH"))
+    .sort((a,b)=>{
+      const ao=Number(a.sort_order??999);
+      const bo=Number(b.sort_order??999);
+      if(ao!==bo)return ao-bo;
+      return String(a.name||"").localeCompare(String(b.name||""));
+    });
+}
+function amMembers(){
+  return members
+    .filter(m=>m.active!==false&&(m.role==="AM"||m.role==="BOTH"))
+    .sort((a,b)=>{
+      const ao=Number(a.sort_order??999);
+      const bo=Number(b.sort_order??999);
+      if(ao!==bo)return ao-bo;
+      return String(a.name||"").localeCompare(String(b.name||""));
+    });
+}
 function memberByName(name){return members.find(m=>String(m.name).toLowerCase().trim()===String(name).toLowerCase().trim())||null}
 function personColor(name){return memberByName(name)?.color||"#ff8a80"}
 function peopleNames(){return webMembers().map(m=>m.name)}
@@ -339,10 +372,45 @@ function fillSelect(select,values,selected=""){select.innerHTML="";[...new Set(v
 function refreshDropdowns(defaultAm=""){fillSelect(assignPerson,peopleNames());fillSelect(taskPerson,peopleNames());fillSelect(filterPerson,["",...peopleNames()]);fillSelect(assignAM,amNames(),defaultAm);fillSelect(taskAM,amNames(),defaultAm);assignType.innerHTML="";taskType.innerHTML="";TYPES.forEach(t=>{assignType.innerHTML+=`<option>${t}</option>`;taskType.innerHTML+=`<option>${t}</option>`})}
 
 async function ensureDefaultMembers(){if(!requireDb())return;const {data,error}=await supabaseClient.from("members").select("id").limit(1);if(error){console.warn(error);members=FALLBACK_MEMBERS;return}if(data&&data.length)return;await supabaseClient.from("members").insert(FALLBACK_MEMBERS)}
-async function loadMembers(){if(!requireDb()){members=FALLBACK_MEMBERS;refreshDropdowns();return}await ensureDefaultMembers();const {data,error}=await supabaseClient.from("members").select("*").order("role").order("name");if(error){console.warn("members fallback",error);members=FALLBACK_MEMBERS}else{members=data||[]}refreshDropdowns();renderMembers()}
-function renderMembers(){if(!document.getElementById("membersBody"))return;membersBody.innerHTML=members.map(m=>`<tr><td><b>${esc(m.name)}</b></td><td>${esc(m.role)}</td><td>${esc(m.telegram_chat_id||"")}</td><td>${esc(m.max_per_day??"")}</td><td>${m.active===false?"No":"Yes"}</td><td><span style="display:inline-block;width:22px;height:14px;border-radius:4px;background:${esc(m.color||"#ddd")}"></span> ${esc(m.color||"")}</td><td><button onclick='openMemberModal(${JSON.stringify(m.id)})'>Edit</button> <button class="danger" onclick='deleteMember(${JSON.stringify(m.id)})'>Delete</button></td></tr>`).join("")}
-function openMemberModal(id=null){editingMember=id?members.find(m=>m.id===id):null;memberModalTitle.textContent=editingMember?"Edit member/AM":"Add member/AM";memberName.value=editingMember?.name||"";memberRole.value=editingMember?.role||"WEB";memberTelegram.value=editingMember?.telegram_chat_id||"";memberMaxDay.value=editingMember?.max_per_day??6;memberColor.value=editingMember?.color||"#ff8a80";memberActive.value=String(editingMember?.active!==false);openModal("memberModal")}
-async function saveMember(){if(!requireDb())return;const payload={name:memberName.value.trim(),role:memberRole.value,telegram_chat_id:memberTelegram.value.trim()||null,max_per_day:memberMaxDay.value===""?null:Number(memberMaxDay.value),color:memberColor.value,active:memberActive.value==="true"};if(!payload.name){toast("Thiếu name","#b71c1c");return}let res;if(editingMember)res=await supabaseClient.from("members").update(payload).eq("id",editingMember.id);else res=await supabaseClient.from("members").insert(payload);if(res.error){toast(res.error.message,"#b71c1c");return}closeModal("memberModal");toast("Saved member","#2e7d32");await loadMembers();await logAction("member_save",null,payload.name,"",payload.name,"Saved member")}
+async function loadMembers(){if(!requireDb()){members=FALLBACK_MEMBERS;refreshDropdowns();return}await ensureDefaultMembers();const {data,error}=await supabaseClient.from("members").select("*").order("role").order("sort_order").order("name");if(error){console.warn("members fallback",error);members=FALLBACK_MEMBERS}else{members=data||[]}refreshDropdowns();renderMembers()}
+function renderMembers(){
+  if(!document.getElementById("membersBody"))return;
+
+  const roleFilter=document.getElementById("memberRoleFilter")?.value||"ALL";
+  const activeFilter=document.getElementById("memberActiveFilter")?.value||"ACTIVE";
+  const q=(document.getElementById("memberSearch")?.value||"").trim().toLowerCase();
+
+  let rows=[...members];
+
+  if(roleFilter!=="ALL"){
+    rows=rows.filter(m=>m.role===roleFilter || (roleFilter==="WEB"&&m.role==="BOTH") || (roleFilter==="AM"&&m.role==="BOTH"));
+  }
+
+  if(activeFilter==="ACTIVE"){
+    rows=rows.filter(m=>m.active!==false);
+  }else if(activeFilter==="INACTIVE"){
+    rows=rows.filter(m=>m.active===false);
+  }
+
+  if(q){
+    rows=rows.filter(m=>[m.name,m.role,m.telegram_chat_id].join(" ").toLowerCase().includes(q));
+  }
+
+  rows.sort((a,b)=>{
+    const roleOrder={WEB:1,BOTH:2,AM:3};
+    const ar=roleOrder[a.role]||9;
+    const br=roleOrder[b.role]||9;
+    if(ar!==br)return ar-br;
+    const ao=Number(a.sort_order??999);
+    const bo=Number(b.sort_order??999);
+    if(ao!==bo)return ao-bo;
+    return String(a.name||"").localeCompare(String(b.name||""));
+  });
+
+  membersBody.innerHTML=rows.map(m=>`<tr><td>${esc(m.sort_order??"")}</td><td><b>${esc(m.name)}</b></td><td>${esc(m.role)}</td><td>${esc(m.telegram_chat_id||"")}</td><td>${esc(m.max_per_day??"")}</td><td>${m.active===false?"No":"Yes"}</td><td><span style="display:inline-block;width:22px;height:14px;border-radius:4px;background:${esc(m.color||"#ddd")}"></span> ${esc(m.color||"")}</td><td><button onclick='openMemberModal(${JSON.stringify(m.id)})'>Edit</button> <button class="danger" onclick='deleteMember(${JSON.stringify(m.id)})'>Delete</button></td></tr>`).join("");
+}
+function openMemberModal(id=null){editingMember=id?members.find(m=>m.id===id):null;memberModalTitle.textContent=editingMember?"Edit member/AM":"Add member/AM";memberName.value=editingMember?.name||"";memberRole.value=editingMember?.role||"WEB";memberTelegram.value=editingMember?.telegram_chat_id||"";memberMaxDay.value=editingMember?.max_per_day??6;memberSortOrder.value=editingMember?.sort_order??999;memberColor.value=editingMember?.color||"#ff8a80";memberActive.value=String(editingMember?.active!==false);openModal("memberModal")}
+async function saveMember(){if(!requireDb())return;const payload={name:memberName.value.trim(),role:memberRole.value,telegram_chat_id:memberTelegram.value.trim()||null,max_per_day:memberMaxDay.value===""?null:Number(memberMaxDay.value),sort_order:memberSortOrder.value===""?999:Number(memberSortOrder.value),color:memberColor.value,active:memberActive.value==="true"};if(!payload.name){toast("Thiếu name","#b71c1c");return}let res;if(editingMember)res=await supabaseClient.from("members").update(payload).eq("id",editingMember.id);else res=await supabaseClient.from("members").insert(payload);if(res.error){toast(res.error.message,"#b71c1c");return}closeModal("memberModal");toast("Saved member","#2e7d32");await loadMembers();await logAction("member_save",null,payload.name,"",payload.name,"Saved member")}
 async function deleteMember(id){if(!requireDb())return;if(!confirm("Delete member/AM này?"))return;const {error}=await supabaseClient.from("members").delete().eq("id",id);if(error){toast(error.message,"#b71c1c");return}toast("Deleted","#b71c1c");await loadMembers()}
 
 function setupUi(){document.querySelectorAll(".nav button").forEach(b=>b.onclick=()=>showPage(b.dataset.page));workloadDate.value=todayStr();setSupabaseUrl.value=settings.supabaseUrl||"";setSupabaseKey.value=settings.supabaseKey||"";setSheetApi.value=settings.sheetApi||"";setTelegram.value=settings.telegramWebhook||"";updateEditState()}
@@ -366,10 +434,73 @@ function loadSheetQueueJsonp(apiUrl){return new Promise((resolve,reject)=>{const
 async function skipQueue(id){if(!requireDb())return;const {error}=await supabaseClient.from("task_queue").update({queue_status:"SKIPPED",updated_at:new Date().toISOString()}).eq("source_id",id);if(error){toast(error.message,"#b71c1c");return}await loadQueue()}
 async function unassignQueue(sourceId){if(!requireDb())return;if(!confirm("Hủy assign task này và trả về Tiệm mới đủ info?"))return;const {error:delErr}=await supabaseClient.from("tasks").delete().eq("source_id",sourceId);if(delErr){toast("Lỗi xóa task calendar: "+delErr.message,"#b71c1c");return}const {error:qErr}=await supabaseClient.from("task_queue").update({queue_status:"NEW",assigned_person:null,assigned_date:null,priority:"Normal",is_current:true,updated_at:new Date().toISOString()}).eq("source_id",sourceId);if(qErr){toast("Lỗi trả queue: "+qErr.message,"#b71c1c");return}await logAction("unassign",null,sourceId,sourceId,"","Unassign from queue");toast("Đã hủy assign và trả về queue","#2e7d32");await Promise.all([loadQueue(),render()])}
 
-function openAssign(id){selectedQueue=queueRows.find(r=>r.source_id===id);if(!selectedQueue)return;const sheetAm=selectedQueue.am||"None";refreshDropdowns(sheetAm);assignTitle.textContent="Assign — "+selectedQueue.source_id;assignText.value=selectedQueue.project;assignAM.value=sheetAm;assignDate.value=selectedQueue.expired_date||todayStr();assignType.value=inferType(selectedQueue);assignPriority.value="Normal";assignPerson.value=suggestPerson(assignDate.value);assignNote.value=selectedQueue.note||"";openModal("assignModal")}
+async function openAssign(id){
+  selectedQueue=queueRows.find(r=>r.source_id===id);
+  if(!selectedQueue)return;
+
+  const sheetAm=selectedQueue.am||"None";
+  refreshDropdowns(sheetAm);
+
+  const nextSlot=await getNextAssignSlot();
+
+  assignTitle.textContent="Assign — "+selectedQueue.source_id;
+  assignText.value=selectedQueue.project;
+  assignAM.value=sheetAm;
+  assignDate.value=nextSlot.date;
+  assignType.value=inferType(selectedQueue);
+  assignPriority.value="Normal";
+  assignPerson.value=nextSlot.person;
+  assignNote.value=selectedQueue.note||"";
+  openModal("assignModal");
+}
 function inferType(r){const t=String(r.template_url||"").trim(),l=String(r.layout_url||"").trim();if(t&&l)return"Design + QR";if(t)return"Design";if(l)return"Menu + QR";return"Design + QR"}
 function suggestPerson(date){const by=getTasksByPersonForDate(date);let best=peopleNames()[0]||"Allen",min=Infinity;webMembers().forEach(m=>{const n=by[m.name]||0;const max=m.max_per_day||999;const score=n>=max?9999:n;if(score<min){min=score;best=m.name}});return best}
-function getTasksByPersonForDate(date){const by={};Object.values(cache).flat().filter(t=>t.task_date===date).forEach(t=>by[t.person]=(by[t.person]||0)+1);return by}
+function getTasksByPersonForDate(date){const by={}
+async function getNextAssignSlot(){
+  if(!requireDb())return {date:todayStr(),person:peopleNames()[0]||"Tony"};
+
+  const team=webMembers();
+  if(!team.length)return {date:todayStr(),person:"Tony"};
+
+  const orderedNames=team.map(m=>m.name);
+  const today=todayStr();
+
+  const {data,error}=await supabaseClient
+    .from("tasks")
+    .select("task_date,person")
+    .in("person",orderedNames)
+    .order("task_date",{ascending:false})
+    .limit(1000);
+
+  if(error){
+    console.warn("getNextAssignSlot error",error);
+    return {date:today,person:orderedNames[0]};
+  }
+
+  if(!data||!data.length){
+    return {date:today,person:orderedNames[0]};
+  }
+
+  let latestDate=data[0].task_date;
+  if(latestDate<today)latestDate=today;
+
+  const assigned=data.filter(t=>t.task_date===latestDate).map(t=>t.person);
+  let maxIndex=-1;
+
+  assigned.forEach(person=>{
+    const idx=orderedNames.indexOf(person);
+    if(idx>maxIndex)maxIndex=idx;
+  });
+
+  if(maxIndex<orderedNames.length-1){
+    return {date:latestDate,person:orderedNames[maxIndex+1]};
+  }
+
+  const nextDate=new Date(latestDate+"T00:00:00");
+  nextDate.setDate(nextDate.getDate()+1);
+
+  return {date:nextDate.toISOString().slice(0,10),person:orderedNames[0]};
+};Object.values(cache).flat().filter(t=>t.task_date===date).forEach(t=>by[t.person]=(by[t.person]||0)+1);return by}
 
 async function assignQueueTask(){if(!requireDb()||!selectedQueue)return;const person=assignPerson.value,taskDate=assignDate.value,type=assignType.value,am=assignAM.value||"None",text=assignText.value.trim();if(!text||!person||!taskDate||!type){toast("Thiếu thông tin assign","#b71c1c");return}const sourceId=selectedQueue.source_id;const webMember=memberByName(person),amMember=memberByName(am);const payload={source_id:sourceId,task_date:taskDate,text,person,type,am,done:false,sort_order:999,priority:assignPriority.value,package_name:selectedQueue.package_name||pkgFromId(sourceId),note:assignNote.value||null};let taskId=null;const {data:exist,error:checkErr}=await supabaseClient.from("tasks").select("id").eq("source_id",sourceId).limit(1);if(checkErr){toast("Lỗi check task: "+checkErr.message,"#b71c1c");return}if(exist&&exist.length){taskId=exist[0].id;const {error}=await supabaseClient.from("tasks").update(payload).eq("id",taskId);if(error){toast("Lỗi update task: "+error.message,"#b71c1c");return}}else{const {data,error}=await supabaseClient.from("tasks").insert(payload).select("id").single();if(error){toast("Lỗi insert task: "+error.message,"#b71c1c");return}taskId=data?.id||null}const {error:qErr}=await supabaseClient.from("task_queue").update({queue_status:"ASSIGNED",assigned_person:person,assigned_date:taskDate,priority:assignPriority.value,updated_at:new Date().toISOString()}).eq("source_id",sourceId);if(qErr){toast("Task đã add nhưng lỗi update queue: "+qErr.message,"#b71c1c");return}const msg=`Project: ${text}\nType: ${type}\n\nMember: ${person}\nAM: ${am}\n📅 ${taskDate}`;await sendTelegram({event:"new",person,person_chat_id:webMember?.telegram_chat_id||"",am,am_chat_id:amMember?.telegram_chat_id||"",type,message:msg});await logAction("assign",taskId,sourceId,text,person,`Assigned to ${person} / AM ${am}`,am);closeModal("assignModal");toast("Đã add vào calendar","#2e7d32");const d=new Date(taskDate+"T00:00:00");if(!isNaN(d.getTime()))current=d;await Promise.all([loadQueue(),render()]);showPage("calendar")}
 async function markQueuePending(){if(!requireDb()||!selectedQueue)return;await supabaseClient.from("task_queue").update({queue_status:"PENDING_INFO",updated_at:new Date().toISOString()}).eq("source_id",selectedQueue.source_id);closeModal("assignModal");await loadQueue()}
