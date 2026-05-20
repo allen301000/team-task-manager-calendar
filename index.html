@@ -126,6 +126,8 @@
           <button class="primary" onclick="syncQueueFromApi()">Sync từ Sheet API</button>
           <button onclick="loadQueue()">Reload Queue</button>
           <button onclick="openBulkAutoAssign()">Auto suggest</button>
+          <button class="warn" onclick="notifyManualDomain()">Thông báo domain thủ công</button>
+          <button class="ghost" onclick="toast('Chức năng tạo domain tự động sẽ bổ sung sau', '#8a6d00')">Tạo domain tự động</button>
         </div>
       </div>
 
@@ -152,7 +154,7 @@
 
         <div class="wrap">
           <table>
-            <thead><tr><th>Source ID</th><th>Project</th><th>AM</th><th>Start</th><th>Expired</th><th>Gói</th><th>Template</th><th>Layout</th><th>Status</th><th>Action</th></tr></thead>
+            <thead><tr><th><input type="checkbox" id="queueCheckAll" onchange="toggleQueueCheckAll(this.checked)"></th><th>Source ID</th><th>Project</th><th>AM</th><th>Start</th><th>Expired</th><th>Domain</th><th>Gói</th><th>Template</th><th>Layout</th><th>Status</th><th>Action</th></tr></thead>
             <tbody id="queueBody"></tbody>
           </table>
         </div>
@@ -254,7 +256,9 @@
           <h3>Apps Script</h3>
           <label>Apps Script Web App URL để lấy task queue</label><input id="setSheetApi" placeholder="https://script.google.com/macros/s/.../exec"><br><br>
           <label>Telegram webhook URL</label><input id="setTelegram" placeholder="https://script.google.com/macros/s/.../exec"><br><br>
-          <div class="note">Có thể dùng chung Apps Script URL nếu file GAS có cả doGet queue API và doPost Telegram.</div>
+          <label>Domain Group Telegram Chat ID</label><input id="setDomainGroupChat" placeholder="-100xxxxxxxxxx"><br><br>
+          <label>Mention trong group domain</label><input id="setDomainMention" placeholder="@lee_web"><br><br>
+          <div class="note">Có thể dùng chung Apps Script URL nếu file GAS có cả doGet queue API và doPost Telegram. Domain Group Chat ID là group nhận thông báo tạo domain.</div>
         </div>
       </div>
     </section>
@@ -311,7 +315,7 @@
 <div id="toast" class="toast"></div>
 
 <script>
-const DEFAULTS={editCode:"TEAM2026",supabaseUrl:"",supabaseKey:"",sheetApi:"",telegramWebhook:""};
+const DEFAULTS={editCode:"TEAM2026",supabaseUrl:"",supabaseKey:"",sheetApi:"",telegramWebhook:"",domainGroupChatId:"",domainMention:"@lee_web"};
 const TYPES=["Design + QR","Design","Menu + QR","Menu","QR"];
 const PACKAGE_POINTS={"Gói S":1,"Gói P":1,"Gói G":1.2,"Gói F":1.2,"Gói Menu + QR":1.5,"Gói Custom":2};
 const FALLBACK_MEMBERS=[
@@ -413,8 +417,8 @@ function openMemberModal(id=null){editingMember=id?members.find(m=>m.id===id):nu
 async function saveMember(){if(!requireDb())return;const payload={name:memberName.value.trim(),role:memberRole.value,telegram_chat_id:memberTelegram.value.trim()||null,max_per_day:memberMaxDay.value===""?null:Number(memberMaxDay.value),sort_order:memberSortOrder.value===""?999:Number(memberSortOrder.value),color:memberColor.value,active:memberActive.value==="true"};if(!payload.name){toast("Thiếu name","#b71c1c");return}let res;if(editingMember)res=await supabaseClient.from("members").update(payload).eq("id",editingMember.id);else res=await supabaseClient.from("members").insert(payload);if(res.error){toast(res.error.message,"#b71c1c");return}closeModal("memberModal");toast("Saved member","#2e7d32");await loadMembers();await logAction("member_save",null,payload.name,"",payload.name,"Saved member")}
 async function deleteMember(id){if(!requireDb())return;if(!confirm("Delete member/AM này?"))return;const {error}=await supabaseClient.from("members").delete().eq("id",id);if(error){toast(error.message,"#b71c1c");return}toast("Deleted","#b71c1c");await loadMembers()}
 
-function setupUi(){document.querySelectorAll(".nav button").forEach(b=>b.onclick=()=>showPage(b.dataset.page));workloadDate.value=todayStr();setSupabaseUrl.value=settings.supabaseUrl||"";setSupabaseKey.value=settings.supabaseKey||"";setSheetApi.value=settings.sheetApi||"";setTelegram.value=settings.telegramWebhook||"";updateEditState()}
-function saveSettings(){settings.supabaseUrl=setSupabaseUrl.value.trim();settings.supabaseKey=setSupabaseKey.value.trim();settings.sheetApi=setSheetApi.value.trim();settings.telegramWebhook=setTelegram.value.trim();localStorage.setItem("tm_settings",JSON.stringify(settings));initClient();toast("Đã lưu setup","#2e7d32");loadMembers()}
+function setupUi(){document.querySelectorAll(".nav button").forEach(b=>b.onclick=()=>showPage(b.dataset.page));workloadDate.value=todayStr();setSupabaseUrl.value=settings.supabaseUrl||"";setSupabaseKey.value=settings.supabaseKey||"";setSheetApi.value=settings.sheetApi||"";setTelegram.value=settings.telegramWebhook||"";setDomainGroupChat.value=settings.domainGroupChatId||"";setDomainMention.value=settings.domainMention||"@lee_web";updateEditState()}
+function saveSettings(){settings.supabaseUrl=setSupabaseUrl.value.trim();settings.supabaseKey=setSupabaseKey.value.trim();settings.sheetApi=setSheetApi.value.trim();settings.telegramWebhook=setTelegram.value.trim();settings.domainGroupChatId=setDomainGroupChat.value.trim();settings.domainMention=setDomainMention.value.trim()||"@lee_web";localStorage.setItem("tm_settings",JSON.stringify(settings));initClient();toast("Đã lưu setup","#2e7d32");loadMembers()}
 function unlockEdit(){if(editCode.value===settings.editCode){canEdit=true;localStorage.setItem("tm_canEdit","1");updateEditState();renderCalendarOnly();toast("Edit unlocked","#2e7d32")}else toast("Wrong code","#b71c1c")}
 function updateEditState(){editState.textContent=canEdit?"✅ Đang mở quyền edit":"🔒 Chỉ xem"}
 function showPage(page){document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("active",b.dataset.page===page));["queue","calendar","workload","report","members","logs","setup"].forEach(p=>document.getElementById(`page-${p}`).classList.toggle("hidden",p!==page));if(page==="queue")loadQueue();if(page==="calendar")render();if(page==="workload")renderWorkload();if(page==="report")renderReport();if(page==="members")loadMembers();if(page==="logs")loadAuditLogs()}
@@ -427,10 +431,85 @@ async function loadQueue(){if(!requireDb())return;const {data,error}=await supab
 function renderQueueFilters(){const cur=queuePackageFilter.value;const ps=[...new Set(queueRows.map(r=>r.package_name||pkgFromId(r.source_id)).filter(Boolean))].sort();queuePackageFilter.innerHTML='<option value="">Tất cả gói</option>'+ps.map(p=>`<option>${esc(p)}</option>`).join("");queuePackageFilter.value=cur}
 function renderQueueKpis(){kpiCurrent.textContent=queueRows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW").length;kpiNew.textContent=queueRows.filter(r=>(r.queue_status||"NEW")==="NEW").length;kpiAssigned.textContent=queueRows.filter(r=>r.queue_status==="ASSIGNED").length;kpiToday.textContent=Object.values(cache).flat().filter(t=>t.task_date===todayStr()).length}
 function safeSource(s){return String(s).replace(/"/g,"&quot;")}
-function renderQueue(){const st=queueStatusFilter.value,pkg=queuePackageFilter.value,q=queueSearch.value.trim().toLowerCase();let rows=[...queueRows];if(st==="CURRENT")rows=rows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW");else if(st!=="ALL")rows=rows.filter(r=>(r.queue_status||"NEW")===st);if(pkg)rows=rows.filter(r=>(r.package_name||pkgFromId(r.source_id))===pkg);if(q)rows=rows.filter(r=>[r.source_id,r.project,r.am,r.package_name].join(" ").toLowerCase().includes(q));queueBody.innerHTML=rows.map(r=>{const st=r.queue_status||"NEW",pn=r.package_name||pkgFromId(r.source_id);return `<tr><td><b>${esc(r.source_id)}</b></td><td><b>${esc(r.project)}</b><div class="muted">${esc(r.note||"")}</div></td><td>${esc(r.am||"")}</td><td>${esc(r.start_date||"")}</td><td>${esc(r.expired_date||"")}</td><td><span class="badge">${esc(pn)}</span></td><td>${r.template_url?`<a href="${esc(r.template_url)}" target="_blank">Open</a>`:""}</td><td>${r.layout_url?`<a href="${esc(r.layout_url)}" target="_blank">Open</a>`:""}</td><td><span class="badge ${st==="ASSIGNED"?"assigned":st==="PENDING_INFO"?"pending":st==="SKIPPED"?"urgent":"new"}">${esc(st)}</span></td><td><button class="primary" onclick='openAssign("${safeSource(r.source_id)}")'>Assign</button> <button class="ghost" onclick='skipQueue("${safeSource(r.source_id)}")'>Skip</button> ${st==="ASSIGNED"?`<button class="warn" onclick='unassignQueue("${safeSource(r.source_id)}")'>Unassign</button>`:""}</td></tr>`}).join("")}
+function renderQueue(){const st=queueStatusFilter.value,pkg=queuePackageFilter.value,q=queueSearch.value.trim().toLowerCase();let rows=[...queueRows];if(st==="CURRENT")rows=rows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW");else if(st!=="ALL")rows=rows.filter(r=>(r.queue_status||"NEW")===st);if(pkg)rows=rows.filter(r=>(r.package_name||pkgFromId(r.source_id))===pkg);if(q)rows=rows.filter(r=>[r.source_id,r.project,r.am,r.package_name].join(" ").toLowerCase().includes(q));queueBody.innerHTML=rows.map(r=>{const st=r.queue_status||"NEW",pn=r.package_name||pkgFromId(r.source_id);return `<tr><td><input type="checkbox" class="queue-domain-check" value="${esc(r.source_id)}"></td><td><b>${esc(r.source_id)}</b></td><td><b>${esc(r.project)}</b><div class="muted">${esc(r.note||"")}</div></td><td>${esc(r.am||"")}</td><td>${esc(r.start_date||"")}</td><td>${esc(r.expired_date||"")}</td><td>${esc(r.domain_url||"sub")}</td><td><span class="badge">${esc(pn)}</span></td><td>${r.template_url?`<a href="${esc(r.template_url)}" target="_blank">Open</a>`:""}</td><td>${r.layout_url?`<a href="${esc(r.layout_url)}" target="_blank">Open</a>`:""}</td><td><span class="badge ${st==="ASSIGNED"?"assigned":st==="PENDING_INFO"?"pending":st==="SKIPPED"?"urgent":"new"}">${esc(st)}</span></td><td><button class="primary" onclick='openAssign("${safeSource(r.source_id)}")'>Assign</button> <button class="ghost" onclick='skipQueue("${safeSource(r.source_id)}")'>Skip</button> ${st==="ASSIGNED"?`<button class="warn" onclick='unassignQueue("${safeSource(r.source_id)}")'>Unassign</button>`:""}</td></tr>`}).join("")}
 
-async function syncQueueFromApi(){clearDebug();console.group("[Task Queue] Sync từ Sheet API");logDebug("[Task Queue] Sync từ Sheet API");if(!requireDb()){console.groupEnd();return}if(!settings.sheetApi){toast("Chưa nhập Apps Script API URL","#b71c1c");console.groupEnd();return}try{toast("Đang sync từ Sheet...","#f05a28");const json=await loadSheetQueueJsonp(settings.sheetApi);logDebug("Raw API response",json);if(!json)throw new Error("Apps Script API không trả dữ liệu");if(json.success===false)throw new Error(json.error||"Apps Script API success=false");const rows=Array.isArray(json)?json:(json.data||[]);const nowIso=new Date().toISOString();await supabaseClient.from("task_queue").update({is_current:false}).neq("source_id","__never__");let payload=rows.map((r,idx)=>{const project=String(r.project||r.Project||r.Projects||"").trim();let sourceId=normalizeProjectId(project||r.source_id||"");if(!sourceId)sourceId="ROW-"+String(r.row_number||idx+1);return{source_id:sourceId,project,am:String(r.am||r.AM||"").trim(),start_date:toDateInput(r.start||r.Start||r.start_date),expired_date:toDateInput(r.expired||r.Expired||r.expired_date),template_url:String(r.template||r.template_url||r["Template màu"]||"").trim(),layout_url:String(r.layout||r.layout_url||r["Layout web"]||"").trim(),package_name:r.package_name||pkgFromId(sourceId),source_status:r.status||r.Status||"Doing",queue_status:"NEW",source_row:r.row_number?String(r.row_number):null,note:r.note||null,is_current:true,last_seen_at:nowIso,updated_at:nowIso}}).filter(r=>r.source_id&&r.project);const seen=new Set();payload=payload.filter(x=>{if(seen.has(x.source_id)){logDebug("Duplicate source_id skipped",x.source_id);return false}seen.add(x.source_id);return true});logDebug("Payload", {total:payload.length, firstFive:payload.slice(0,5)});if(!payload.length){toast("API không có task hợp lệ","#8a6d00");return}const {data,error}=await supabaseClient.from("task_queue").upsert(payload,{onConflict:"source_id",ignoreDuplicates:false}).select();logDebug("Supabase upsert result",{count:data?data.length:0,error});if(error)throw error;queueStatusFilter.value="CURRENT";toast(`Đã sync ${payload.length} task vào queue`,"#2e7d32");await loadQueue()}catch(e){console.error(e);logDebug("SYNC ERROR",e.message||e);toast("Sync lỗi: "+(e.message||e),"#b71c1c")}finally{console.groupEnd()}}
+async function syncQueueFromApi(){clearDebug();console.group("[Task Queue] Sync từ Sheet API");logDebug("[Task Queue] Sync từ Sheet API");if(!requireDb()){console.groupEnd();return}if(!settings.sheetApi){toast("Chưa nhập Apps Script API URL","#b71c1c");console.groupEnd();return}try{toast("Đang sync từ Sheet...","#f05a28");const json=await loadSheetQueueJsonp(settings.sheetApi);logDebug("Raw API response",json);if(!json)throw new Error("Apps Script API không trả dữ liệu");if(json.success===false)throw new Error(json.error||"Apps Script API success=false");const rows=Array.isArray(json)?json:(json.data||[]);const nowIso=new Date().toISOString();await supabaseClient.from("task_queue").update({is_current:false}).neq("source_id","__never__");let payload=rows.map((r,idx)=>{const project=String(r.project||r.Project||r.Projects||"").trim();let sourceId=normalizeProjectId(project||r.source_id||"");if(!sourceId)sourceId="ROW-"+String(r.row_number||idx+1);return{source_id:sourceId,project,am:String(r.am||r.AM||"").trim(),start_date:toDateInput(r.start||r.Start||r.start_date),expired_date:toDateInput(r.expired||r.Expired||r.expired_date),template_url:String(r.template||r.template_url||r["Template màu"]||"").trim(),layout_url:String(r.layout||r.layout_url||r["Layout web"]||"").trim(),domain_url:String(r.domain||r.Domain||r.domain_url||"").trim(),package_name:r.package_name||pkgFromId(sourceId),source_status:r.status||r.Status||"Doing",queue_status:"NEW",source_row:r.row_number?String(r.row_number):null,note:r.note||null,is_current:true,last_seen_at:nowIso,updated_at:nowIso}}).filter(r=>r.source_id&&r.project);const seen=new Set();payload=payload.filter(x=>{if(seen.has(x.source_id)){logDebug("Duplicate source_id skipped",x.source_id);return false}seen.add(x.source_id);return true});logDebug("Payload", {total:payload.length, firstFive:payload.slice(0,5)});if(!payload.length){toast("API không có task hợp lệ","#8a6d00");return}const {data,error}=await supabaseClient.from("task_queue").upsert(payload,{onConflict:"source_id",ignoreDuplicates:false}).select();logDebug("Supabase upsert result",{count:data?data.length:0,error});if(error)throw error;queueStatusFilter.value="CURRENT";toast(`Đã sync ${payload.length} task vào queue`,"#2e7d32");await loadQueue()}catch(e){console.error(e);logDebug("SYNC ERROR",e.message||e);toast("Sync lỗi: "+(e.message||e),"#b71c1c")}finally{console.groupEnd()}}
 function loadSheetQueueJsonp(apiUrl){return new Promise((resolve,reject)=>{const cb="sheetQueueCb_"+Date.now()+"_"+Math.floor(Math.random()*100000);const sep=apiUrl.includes("?")?"&":"?";const url=`${apiUrl}${sep}action=queue&callback=${cb}`;logDebug("JSONP request URL",url);const s=document.createElement("script");const timer=setTimeout(()=>{cleanup();reject(new Error("Sheet API timeout sau 20s"))},20000);function cleanup(){clearTimeout(timer);delete window[cb];if(s.parentNode)s.parentNode.removeChild(s)}window[cb]=data=>{logDebug("JSONP callback received",data);cleanup();resolve(data)};s.onerror=()=>{cleanup();reject(new Error("Không load được Apps Script API"))};s.onload=()=>logDebug("JSONP script loaded");s.src=url;document.body.appendChild(s)})}
+
+function toggleQueueCheckAll(checked){
+  document
+    .querySelectorAll(".queue-domain-check")
+    .forEach(cb=>cb.checked=checked);
+}
+
+function extractProjectCode(project){
+  const text=String(project||"").trim();
+  const m=text.match(/^([A-Z0-9*]{5,14})\b/i);
+  return m?m[1].toUpperCase():text.split(/\s+/)[0]||"";
+}
+
+async function notifyManualDomain(){
+  if(!requireDb())return;
+
+  if(!settings.telegramWebhook){
+    toast("Chưa nhập Telegram webhook URL trong Setup", "#b71c1c");
+    return;
+  }
+
+  if(!settings.domainGroupChatId){
+    toast("Chưa nhập Domain Group Telegram Chat ID trong Setup", "#b71c1c");
+    return;
+  }
+
+  const selectedIds=[...document.querySelectorAll(".queue-domain-check:checked")]
+    .map(cb=>cb.value);
+
+  if(!selectedIds.length){
+    toast("Chưa chọn project nào", "#8a6d00");
+    return;
+  }
+
+  const selectedRows=queueRows.filter(r=>selectedIds.includes(r.source_id));
+
+  if(!selectedRows.length){
+    toast("Không tìm thấy project đã chọn trong queue", "#b71c1c");
+    return;
+  }
+
+  const mention=settings.domainMention||"@lee_web";
+
+  const lines=selectedRows.map(r=>{
+    const code=extractProjectCode(r.project||r.source_id);
+    const domain=String(r.domain_url||"").trim()||"sub";
+    return `${code} - ${domain}`;
+  });
+
+  const message=`${mention}\n\n${lines.join("\n")}`;
+
+  const ok=confirm(`Gửi thông báo domain thủ công cho ${selectedRows.length} project?`);
+  if(!ok)return;
+
+  await sendTelegram({
+    event:"domain_manual",
+    group_chat_id:settings.domainGroupChatId,
+    message
+  });
+
+  await Promise.all(selectedRows.map(r=>
+    logAction(
+      "domain_manual",
+      null,
+      r.source_id,
+      r.project,
+      "",
+      `Manual domain notice: ${String(r.domain_url||"").trim()||"sub"}`,
+      r.am||""
+    )
+  ));
+
+  toast("Đã gửi thông báo domain thủ công", "#2e7d32");
+}
+
 async function skipQueue(id){if(!requireDb())return;const {error}=await supabaseClient.from("task_queue").update({queue_status:"SKIPPED",updated_at:new Date().toISOString()}).eq("source_id",id);if(error){toast(error.message,"#b71c1c");return}await loadQueue()}
 async function unassignQueue(sourceId){
   if(!requireDb())return;
