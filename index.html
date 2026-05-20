@@ -1075,6 +1075,7 @@ async function assignQueueTask() {
 
   let taskId = null;
 
+  // Check task đã tồn tại chưa, không dùng upsert để tránh lỗi unique constraint
   const { data: existingTasks, error: checkError } = await supabaseClient
     .from("tasks")
     .select("id")
@@ -1100,7 +1101,6 @@ async function assignQueueTask() {
       console.error(updateError);
       return;
     }
-
   } else {
     const { data: insertedTask, error: insertError } = await supabaseClient
       .from("tasks")
@@ -1117,10 +1117,7 @@ async function assignQueueTask() {
     taskId = insertedTask?.id || null;
   }
 
-  /**
-   * Không update assigned_task_id vì cột này đang là UUID
-   * trong khi tasks.id của bạn là số như 729.
-   */
+  // Không update assigned_task_id để tránh lỗi uuid/bigint
   const { error: queueError } = await supabaseClient
     .from("task_queue")
     .update({
@@ -1154,7 +1151,14 @@ async function assignQueueTask() {
   closeModal("assignModal");
   toast("Đã add vào calendar", "#2e7d32");
 
+  const assignedDateObj = new Date(taskDate + "T00:00:00");
+
+  if (!isNaN(assignedDateObj.getTime())) {
+    current = assignedDateObj;
+  }
+
   await Promise.all([loadQueue(), render()]);
+  showPage("calendar");
 }
     async function markQueuePending() { if (!requireDb() || !selectedQueue) return; await supabaseClient.from("task_queue").update({ queue_status: "PENDING_INFO", updated_at: new Date().toISOString() }).eq("source_id", selectedQueue.source_id); closeModal("assignModal"); await loadQueue() }
     function openBulkAutoAssign() { toast("Gợi ý: bấm Assign, hệ thống tự chọn người ít task nhất theo ngày", "#f05a28") }
