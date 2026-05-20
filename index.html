@@ -478,11 +478,11 @@ async function notifyManualDomain(){
 
   const mention=settings.domainMention||"@lee_web";
 
-  const lines=selectedRows.map(r=>{
-    const code=extractProjectCode(r.project||r.source_id);
-    const domain=String(r.domain_url||"").trim()||"sub";
-    return `${code} - ${domain}`;
-  });
+const lines=selectedRows.map(r=>{
+  const projectName=String(r.project||r.source_id||"").trim();
+  const domain=String(r.domain_url||"").trim()||"sub";
+  return `${projectName} - ${domain}`;
+});
 
   const message=`${mention}\n\n${lines.join("\n")}`;
 
