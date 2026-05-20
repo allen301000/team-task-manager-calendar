@@ -433,74 +433,112 @@ async function syncQueueFromApi(){clearDebug();console.group("[Task Queue] Sync 
 function loadSheetQueueJsonp(apiUrl){return new Promise((resolve,reject)=>{const cb="sheetQueueCb_"+Date.now()+"_"+Math.floor(Math.random()*100000);const sep=apiUrl.includes("?")?"&":"?";const url=`${apiUrl}${sep}action=queue&callback=${cb}`;logDebug("JSONP request URL",url);const s=document.createElement("script");const timer=setTimeout(()=>{cleanup();reject(new Error("Sheet API timeout sau 20s"))},20000);function cleanup(){clearTimeout(timer);delete window[cb];if(s.parentNode)s.parentNode.removeChild(s)}window[cb]=data=>{logDebug("JSONP callback received",data);cleanup();resolve(data)};s.onerror=()=>{cleanup();reject(new Error("Không load được Apps Script API"))};s.onload=()=>logDebug("JSONP script loaded");s.src=url;document.body.appendChild(s)})}
 async function skipQueue(id){if(!requireDb())return;const {error}=await supabaseClient.from("task_queue").update({queue_status:"SKIPPED",updated_at:new Date().toISOString()}).eq("source_id",id);if(error){toast(error.message,"#b71c1c");return}await loadQueue()}
 async function unassignQueue(sourceId){if(!requireDb())return;if(!confirm("Hủy assign task này và trả về Tiệm mới đủ info?"))return;const {error:delErr}=await supabaseClient.from("tasks").delete().eq("source_id",sourceId);if(delErr){toast("Lỗi xóa task calendar: "+delErr.message,"#b71c1c");return}const {error:qErr}=await supabaseClient.from("task_queue").update({queue_status:"NEW",assigned_person:null,assigned_date:null,priority:"Normal",is_current:true,updated_at:new Date().toISOString()}).eq("source_id",sourceId);if(qErr){toast("Lỗi trả queue: "+qErr.message,"#b71c1c");return}await logAction("unassign",null,sourceId,sourceId,"","Unassign from queue");toast("Đã hủy assign và trả về queue","#2e7d32");await Promise.all([loadQueue(),render()])}
+async function getNextAssignSlot() {
+  if (!requireDb()) {
+    return {
+      date: todayStr(),
+      person: peopleNames()[0] || "Tony"
+    };
+  }
 
-async function openAssign(id){
-  selectedQueue=queueRows.find(r=>r.source_id===id);
-  if(!selectedQueue)return;
+  const team = webMembers();
 
-  const sheetAm=selectedQueue.am||"None";
+  if (!team.length) {
+    return {
+      date: todayStr(),
+      person: "Tony"
+    };
+  }
+
+  const orderedNames = team.map(m => m.name);
+  const today = todayStr();
+
+  const { data, error } = await supabaseClient
+    .from("tasks")
+    .select("task_date, person")
+    .in("person", orderedNames)
+    .order("task_date", { ascending: false })
+    .limit(1000);
+
+  if (error) {
+    console.warn("getNextAssignSlot error:", error);
+
+    return {
+      date: today,
+      person: orderedNames[0]
+    };
+  }
+
+  if (!data || !data.length) {
+    return {
+      date: today,
+      person: orderedNames[0]
+    };
+  }
+
+  let latestDate = data[0].task_date;
+
+  // Không tự assign về ngày quá khứ
+  if (latestDate < today) {
+    latestDate = today;
+  }
+
+  const assignedOnLatestDate = data
+    .filter(t => t.task_date === latestDate)
+    .map(t => t.person);
+
+  let maxIndex = -1;
+
+  assignedOnLatestDate.forEach(person => {
+    const idx = orderedNames.indexOf(person);
+
+    if (idx > maxIndex) {
+      maxIndex = idx;
+    }
+  });
+
+  // Nếu ngày mới nhất chưa đủ vòng team thì lấy người tiếp theo
+  if (maxIndex < orderedNames.length - 1) {
+    return {
+      date: latestDate,
+      person: orderedNames[maxIndex + 1]
+    };
+  }
+
+  // Nếu ngày mới nhất đã đủ team thì qua ngày tiếp theo, quay lại người đầu tiên
+  const nextDate = new Date(latestDate + "T00:00:00");
+  nextDate.setDate(nextDate.getDate() + 1);
+
+  return {
+    date: nextDate.toISOString().slice(0, 10),
+    person: orderedNames[0]
+  };
+}
+async function openAssign(id) {
+  selectedQueue = queueRows.find(r => r.source_id === id);
+
+  if (!selectedQueue) return;
+
+  const sheetAm = selectedQueue.am || "None";
+
   refreshDropdowns(sheetAm);
 
-  const nextSlot=await getNextAssignSlot();
+  const nextSlot = await getNextAssignSlot();
 
-  assignTitle.textContent="Assign — "+selectedQueue.source_id;
-  assignText.value=selectedQueue.project;
-  assignAM.value=sheetAm;
-  assignDate.value=nextSlot.date;
-  assignType.value=inferType(selectedQueue);
-  assignPriority.value="Normal";
-  assignPerson.value=nextSlot.person;
-  assignNote.value=selectedQueue.note||"";
+  assignTitle.textContent = "Assign — " + selectedQueue.source_id;
+  assignText.value = selectedQueue.project;
+  assignAM.value = sheetAm;
+  assignDate.value = nextSlot.date;
+  assignType.value = inferType(selectedQueue);
+  assignPriority.value = "Normal";
+  assignPerson.value = nextSlot.person;
+  assignNote.value = selectedQueue.note || "";
+
   openModal("assignModal");
 }
 function inferType(r){const t=String(r.template_url||"").trim(),l=String(r.layout_url||"").trim();if(t&&l)return"Design + QR";if(t)return"Design";if(l)return"Menu + QR";return"Design + QR"}
 function suggestPerson(date){const by=getTasksByPersonForDate(date);let best=peopleNames()[0]||"Allen",min=Infinity;webMembers().forEach(m=>{const n=by[m.name]||0;const max=m.max_per_day||999;const score=n>=max?9999:n;if(score<min){min=score;best=m.name}});return best}
 function getTasksByPersonForDate(date){const by={}
-async function getNextAssignSlot(){
-  if(!requireDb())return {date:todayStr(),person:peopleNames()[0]||"Tony"};
-
-  const team=webMembers();
-  if(!team.length)return {date:todayStr(),person:"Tony"};
-
-  const orderedNames=team.map(m=>m.name);
-  const today=todayStr();
-
-  const {data,error}=await supabaseClient
-    .from("tasks")
-    .select("task_date,person")
-    .in("person",orderedNames)
-    .order("task_date",{ascending:false})
-    .limit(1000);
-
-  if(error){
-    console.warn("getNextAssignSlot error",error);
-    return {date:today,person:orderedNames[0]};
-  }
-
-  if(!data||!data.length){
-    return {date:today,person:orderedNames[0]};
-  }
-
-  let latestDate=data[0].task_date;
-  if(latestDate<today)latestDate=today;
-
-  const assigned=data.filter(t=>t.task_date===latestDate).map(t=>t.person);
-  let maxIndex=-1;
-
-  assigned.forEach(person=>{
-    const idx=orderedNames.indexOf(person);
-    if(idx>maxIndex)maxIndex=idx;
-  });
-
-  if(maxIndex<orderedNames.length-1){
-    return {date:latestDate,person:orderedNames[maxIndex+1]};
-  }
-
-  const nextDate=new Date(latestDate+"T00:00:00");
-  nextDate.setDate(nextDate.getDate()+1);
-
-  return {date:nextDate.toISOString().slice(0,10),person:orderedNames[0]};
-};Object.values(cache).flat().filter(t=>t.task_date===date).forEach(t=>by[t.person]=(by[t.person]||0)+1);return by}
 
 async function assignQueueTask(){if(!requireDb()||!selectedQueue)return;const person=assignPerson.value,taskDate=assignDate.value,type=assignType.value,am=assignAM.value||"None",text=assignText.value.trim();if(!text||!person||!taskDate||!type){toast("Thiếu thông tin assign","#b71c1c");return}const sourceId=selectedQueue.source_id;const webMember=memberByName(person),amMember=memberByName(am);const payload={source_id:sourceId,task_date:taskDate,text,person,type,am,done:false,sort_order:999,priority:assignPriority.value,package_name:selectedQueue.package_name||pkgFromId(sourceId),note:assignNote.value||null};let taskId=null;const {data:exist,error:checkErr}=await supabaseClient.from("tasks").select("id").eq("source_id",sourceId).limit(1);if(checkErr){toast("Lỗi check task: "+checkErr.message,"#b71c1c");return}if(exist&&exist.length){taskId=exist[0].id;const {error}=await supabaseClient.from("tasks").update(payload).eq("id",taskId);if(error){toast("Lỗi update task: "+error.message,"#b71c1c");return}}else{const {data,error}=await supabaseClient.from("tasks").insert(payload).select("id").single();if(error){toast("Lỗi insert task: "+error.message,"#b71c1c");return}taskId=data?.id||null}const {error:qErr}=await supabaseClient.from("task_queue").update({queue_status:"ASSIGNED",assigned_person:person,assigned_date:taskDate,priority:assignPriority.value,updated_at:new Date().toISOString()}).eq("source_id",sourceId);if(qErr){toast("Task đã add nhưng lỗi update queue: "+qErr.message,"#b71c1c");return}const msg=`Project: ${text}\nType: ${type}\n\nMember: ${person}\nAM: ${am}\n📅 ${taskDate}`;await sendTelegram({event:"new",person,person_chat_id:webMember?.telegram_chat_id||"",am,am_chat_id:amMember?.telegram_chat_id||"",type,message:msg});await logAction("assign",taskId,sourceId,text,person,`Assigned to ${person} / AM ${am}`,am);closeModal("assignModal");toast("Đã add vào calendar","#2e7d32");const d=new Date(taskDate+"T00:00:00");if(!isNaN(d.getTime()))current=d;await Promise.all([loadQueue(),render()]);showPage("calendar")}
 async function markQueuePending(){if(!requireDb()||!selectedQueue)return;await supabaseClient.from("task_queue").update({queue_status:"PENDING_INFO",updated_at:new Date().toISOString()}).eq("source_id",selectedQueue.source_id);closeModal("assignModal");await loadQueue()}
