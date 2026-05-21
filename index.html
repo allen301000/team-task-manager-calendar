@@ -1730,13 +1730,15 @@ async function notifyManualDomain(){
 
   const mention=settings.domainMention||"@lee_web";
 
-  const lines=notYetNotified.map(r=>{
-    const projectName=String(r.project||r.source_id||"").trim();
-    const domain=String(r.domain_url||"").trim()||"sub";
-    return `${projectName} - ${domain}`;
+  const projectLines=notYetNotified.map(r=>{
+    return String(r.project||r.source_id||"").trim();
   });
 
-  const message=`${mention}\n\n${lines.join("\n")}`;
+  const domainLines=notYetNotified.map(r=>{
+    return String(r.domain_url||"").trim()||"sub";
+  });
+
+  const message=`${mention}\\n\\n${projectLines.join("\\n")}\\n----------------------------------------\\n${domainLines.join("\\n")}`;
 
   await sendTelegram({
     event:"domain_manual",
