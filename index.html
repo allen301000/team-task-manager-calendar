@@ -746,7 +746,7 @@ td .badge.urgent{margin-top:4px}
             <h3>Danh sách Queue</h3>
             <div class="muted" id="queueResultSummary">Đang hiển thị 0 project</div>
           </div>
-          <div class="muted">Chuột phải vào dòng để thao tác nhanh</div>
+          <div class="muted">Ưu tiên tiệm cần báo domain / chưa assign, bên trong mỗi nhóm theo thứ tự Sheet</div>
         </div>
 
         <div class="queue-toolbar">
@@ -1125,7 +1125,7 @@ async function selectAllTaskQueueRows(){
     const {data,error}=await supabaseClient
       .from("task_queue")
       .select("*")
-      .order("updated_at",{ascending:false})
+      .order("source_row",{ascending:true})
       .range(from,to);
 
     if(error)throw error;
@@ -1164,7 +1164,7 @@ async function loadQueue(){
   if(!requireDb())return;
 
   try{
-    queueRows=await selectAllTaskQueueRows();
+    queueRows=sortBySheetOrder(await selectAllTaskQueueRows());
     renderQueueFilters();
     renderQueue();
     renderQueueKpis();
@@ -1215,6 +1215,45 @@ function renderQueueKpis(){
 
   updateQueueMenuCounts();
 }
+
+function sheetOrderValue(row){
+  const n=Number(row?.source_row||row?.row_number||0);
+  return Number.isFinite(n)&&n>0?n:999999999;
+}
+
+
+function isNeedDomainAssign(row){
+  const status=row?.queue_status||"NEW";
+  return (!row?.domain_notified)&&status!=="ASSIGNED"&&!row?.assigned_person;
+}
+
+function sortQueuePriorityThenSheet(rows){
+  return [...rows].sort((a,b)=>{
+    const ap=isNeedDomainAssign(a);
+    const bp=isNeedDomainAssign(b);
+
+    if(ap!==bp)return ap?-1:1;
+
+    const ao=sheetOrderValue(a);
+    const bo=sheetOrderValue(b);
+
+    if(ao!==bo)return ao-bo;
+
+    return String(a.project||a.source_id||"").localeCompare(String(b.project||b.source_id||""));
+  });
+}
+
+function sortBySheetOrder(rows){
+  return [...rows].sort((a,b)=>{
+    const ao=sheetOrderValue(a);
+    const bo=sheetOrderValue(b);
+
+    if(ao!==bo)return ao-bo;
+
+    return String(a.project||a.source_id||"").localeCompare(String(b.project||b.source_id||""));
+  });
+}
+
 function safeSource(s){return String(s).replace(/"/g,"&quot;")}
 function renderQueue(){
   const st=queueStatusFilter.value;
@@ -1254,23 +1293,7 @@ function renderQueue(){
     ].join(" ").toLowerCase().includes(q));
   }
 
-  // Ưu tiên: chưa báo domain + chưa assign lên đầu.
-  rows.sort((a,b)=>{
-    const aNeeds=(!a.domain_notified)&&((a.queue_status||"NEW")!=="ASSIGNED")&&!a.assigned_person;
-    const bNeeds=(!b.domain_notified)&&((b.queue_status||"NEW")!=="ASSIGNED")&&!b.assigned_person;
-
-    if(aNeeds!==bNeeds)return aNeeds?-1:1;
-
-    const aAssigned=(a.queue_status==="ASSIGNED")||!!a.assigned_person;
-    const bAssigned=(b.queue_status==="ASSIGNED")||!!b.assigned_person;
-
-    if(aAssigned!==bAssigned)return aAssigned?1:-1;
-
-    const ad=String(a.start_date||a.updated_at||"");
-    const bd=String(b.start_date||b.updated_at||"");
-
-    return ad.localeCompare(bd);
-  });
+  rows=sortQueuePriorityThenSheet(rows);
 
   if(document.getElementById("queueResultSummary")){
     const label=queueStatusFilter.options[queueStatusFilter.selectedIndex]?.textContent||"Queue";
@@ -1288,7 +1311,6 @@ function renderQueue(){
       <td><input type="checkbox" class="queue-domain-check" value="${esc(r.source_id)}"></td>
       <td><b>${esc(r.source_id)}</b></td>
       <td><b>${esc(r.project)}</b>
-        ${(!r.domain_notified&&st!=="ASSIGNED"&&!r.assigned_person)?`<div><span class="badge urgent">Cần báo domain / assign</span></div>`:""}
         <div class="muted">${esc(r.note||"")}</div></td>
       <td>${esc(r.am||"")}</td>
       <td>${esc(r.start_date||"")}</td>
@@ -1682,7 +1704,7 @@ async function notifyManualDomain(){
     return;
   }
 
-  const selectedRows=queueRows.filter(r=>selectedIds.includes(r.source_id));
+  const selectedRows=sortBySheetOrder(queueRows.filter(r=>selectedIds.includes(r.source_id)));
 
   if(!selectedRows.length){
     toast("Không tìm thấy project đã chọn trong queue", "#b71c1c");
