@@ -241,6 +241,16 @@
   .queue-dashboard{grid-template-columns:1fr}
 }
 
+  
+/* ===== Task Queue Sidebar Submenu Patch ===== */
+.nav-group{margin-bottom:8px}
+.nav-sub{margin:4px 0 10px 14px;padding-left:10px;border-left:2px solid #ffe1d3}
+.nav-sub button{display:flex!important;align-items:center;justify-content:space-between;gap:8px;width:100%;font-size:13px;margin-bottom:5px!important;padding:8px 10px!important;border-radius:10px!important;color:#374151}
+.nav-sub button.active{background:#fff1eb!important;color:#f05a28!important;border:1px solid #ffc7b3!important}
+.nav-count{min-width:26px;text-align:center;font-size:11px;padding:2px 7px;border-radius:999px;background:#f3f4f6;color:#374151;font-weight:800}
+.nav-sub button.active .nav-count{background:#f05a28;color:#fff}
+.queue-filter-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:#fff1eb;color:#f05a28;font-weight:800;border:1px solid #ffc7b3}
+
   </style>
 </head>
 
@@ -253,7 +263,17 @@
     </div>
 
     <div class="nav">
-      <button class="active" data-page="queue">📥 Task Queue</button>
+      <div class="nav-group">
+        <button class="active" data-page="queue" data-queue-filter="CURRENT">📥 Task Queue</button>
+        <div class="nav-sub">
+          <button class="active" data-page="queue" data-queue-filter="CURRENT">Tiệm mới đủ info <span class="nav-count" id="navCountCurrent">0</span></button>
+          <button data-page="queue" data-queue-filter="NEW">Chưa assign <span class="nav-count" id="navCountNew">0</span></button>
+          <button data-page="queue" data-queue-filter="ASSIGNED">Đã assign <span class="nav-count" id="navCountAssigned">0</span></button>
+          <button data-page="queue" data-queue-filter="PENDING_INFO">Pending info <span class="nav-count" id="navCountPending">0</span></button>
+          <button data-page="queue" data-queue-filter="SKIPPED">Skipped <span class="nav-count" id="navCountSkipped">0</span></button>
+          <button data-page="queue" data-queue-filter="ALL">Tất cả <span class="nav-count" id="navCountAll">0</span></button>
+        </div>
+      </div>
       <button data-page="calendar">📅 Calendar</button>
       <button data-page="workload">👥 Workload</button>
       <button data-page="report">📊 Report</button>
@@ -335,7 +355,7 @@
 
         <div class="queue-toolbar">
           <div class="queue-toolbar-left">
-            <select id="queueStatusFilter" class="queue-status-select" onchange="renderQueue()">
+            <select id="queueStatusFilter" class="queue-status-select hidden" onchange="renderQueue()">
               <option value="CURRENT">📥 Tiệm mới đủ info</option>
               <option value="NEW">🟡 Chưa assign</option>
               <option value="ALL">📚 Tất cả</option>
@@ -343,6 +363,7 @@
               <option value="PENDING_INFO">⚠️ Pending info</option>
               <option value="SKIPPED">⛔ Skipped</option>
             </select>
+            <span class="queue-filter-chip" id="queueCurrentFilterChip">📥 Tiệm mới đủ info</span>
             <select id="queuePackageFilter" onchange="renderQueue()"><option value="">Tất cả gói</option></select>
             <input id="queueAssignMonthFilter" class="queue-month-input" type="month" onchange="renderQueue()" title="Lọc theo tháng assign">
             <input id="queueSearch" class="queue-search-input" placeholder="Tìm project / AM / source id..." oninput="renderQueue()">
@@ -606,6 +627,39 @@ function personColor(name){return memberByName(name)?.color||"#ff8a80"}
 function peopleNames(){return webMembers().map(m=>m.name)}
 function amNames(){const arr=amMembers().map(m=>m.name);return arr.includes("None")?arr:["None",...arr]}
 
+
+function queueFilterLabel(value){
+  const map={CURRENT:"📥 Tiệm mới đủ info",NEW:"🟡 Chưa assign",ASSIGNED:"✅ Đã assign",PENDING_INFO:"⚠️ Pending info",SKIPPED:"⛔ Skipped",ALL:"📚 Tất cả"};
+  return map[value]||map.CURRENT;
+}
+function updateQueueMenuCounts(){
+  const counts={
+    current:queueRows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW").length,
+    new:queueRows.filter(r=>(r.queue_status||"NEW")==="NEW").length,
+    assigned:queueRows.filter(r=>r.queue_status==="ASSIGNED").length,
+    pending:queueRows.filter(r=>r.queue_status==="PENDING_INFO").length,
+    skipped:queueRows.filter(r=>r.queue_status==="SKIPPED").length,
+    all:queueRows.length
+  };
+  if(document.getElementById("navCountCurrent"))navCountCurrent.textContent=counts.current;
+  if(document.getElementById("navCountNew"))navCountNew.textContent=counts.new;
+  if(document.getElementById("navCountAssigned"))navCountAssigned.textContent=counts.assigned;
+  if(document.getElementById("navCountPending"))navCountPending.textContent=counts.pending;
+  if(document.getElementById("navCountSkipped"))navCountSkipped.textContent=counts.skipped;
+  if(document.getElementById("navCountAll"))navCountAll.textContent=counts.all;
+}
+function setQueueMenuFilter(value){
+  const finalValue=value||"CURRENT";
+  if(document.getElementById("queueStatusFilter"))queueStatusFilter.value=finalValue;
+  if(document.getElementById("queueCurrentFilterChip"))queueCurrentFilterChip.textContent=queueFilterLabel(finalValue);
+  document.querySelectorAll(".nav [data-queue-filter]").forEach(btn=>btn.classList.toggle("active",btn.dataset.queueFilter===finalValue));
+  document.querySelectorAll(".nav button").forEach(btn=>{
+    if(!btn.dataset.queueFilter)btn.classList.toggle("active",btn.dataset.page==="queue");
+  });
+  ["queue","calendar","workload","report","members","logs","setup"].forEach(p=>document.getElementById(`page-${p}`).classList.toggle("hidden",p!=="queue"));
+  loadQueue();
+}
+
 function fillSelect(select,values,selected=""){select.innerHTML="";[...new Set(values.filter(v=>v!==undefined&&v!==null).map(v=>String(v).trim()))].forEach(v=>{const op=document.createElement("option");op.value=v;op.textContent=v||"All people";select.appendChild(op)});if(selected&&!Array.from(select.options).some(o=>o.value===selected)){const op=document.createElement("option");op.value=selected;op.textContent=selected+" (from sheet)";select.insertBefore(op,select.firstChild)} if(selected)select.value=selected}
 function refreshDropdowns(defaultAm=""){fillSelect(assignPerson,peopleNames());fillSelect(taskPerson,peopleNames());fillSelect(filterPerson,["",...peopleNames()]);fillSelect(assignAM,amNames(),defaultAm);fillSelect(taskAM,amNames(),defaultAm);assignType.innerHTML="";taskType.innerHTML="";TYPES.forEach(t=>{assignType.innerHTML+=`<option>${t}</option>`;taskType.innerHTML+=`<option>${t}</option>`})}
 
@@ -651,11 +705,11 @@ function openMemberModal(id=null){editingMember=id?members.find(m=>m.id===id):nu
 async function saveMember(){if(!requireDb())return;const payload={name:memberName.value.trim(),role:memberRole.value,telegram_chat_id:memberTelegram.value.trim()||null,max_per_day:memberMaxDay.value===""?null:Number(memberMaxDay.value),sort_order:memberSortOrder.value===""?999:Number(memberSortOrder.value),color:memberColor.value,active:memberActive.value==="true"};if(!payload.name){toast("Thiếu name","#b71c1c");return}let res;if(editingMember)res=await supabaseClient.from("members").update(payload).eq("id",editingMember.id);else res=await supabaseClient.from("members").insert(payload);if(res.error){toast(res.error.message,"#b71c1c");return}closeModal("memberModal");toast("Saved member","#2e7d32");await loadMembers();await logAction("member_save",null,payload.name,"",payload.name,"Saved member")}
 async function deleteMember(id){if(!requireDb())return;if(!confirm("Delete member/AM này?"))return;const {error}=await supabaseClient.from("members").delete().eq("id",id);if(error){toast(error.message,"#b71c1c");return}toast("Deleted","#b71c1c");await loadMembers()}
 
-function setupUi(){document.querySelectorAll(".nav button").forEach(b=>b.onclick=()=>showPage(b.dataset.page));workloadDate.value=todayStr();setSupabaseUrl.value=settings.supabaseUrl||"";setSupabaseKey.value=settings.supabaseKey||"";setSheetApi.value=settings.sheetApi||"";setTelegram.value=settings.telegramWebhook||"";setDomainGroupChat.value=settings.domainGroupChatId||"";setDomainMention.value=settings.domainMention||"@lee_web";updateEditState()}
+function setupUi(){document.querySelectorAll(".nav button").forEach(b=>b.onclick=()=>{if(b.dataset.page==="queue")setQueueMenuFilter(b.dataset.queueFilter||"CURRENT");else showPage(b.dataset.page)});workloadDate.value=todayStr();setSupabaseUrl.value=settings.supabaseUrl||"";setSupabaseKey.value=settings.supabaseKey||"";setSheetApi.value=settings.sheetApi||"";setTelegram.value=settings.telegramWebhook||"";setDomainGroupChat.value=settings.domainGroupChatId||"";setDomainMention.value=settings.domainMention||"@lee_web";if(document.getElementById("queueCurrentFilterChip"))queueCurrentFilterChip.textContent=queueFilterLabel(queueStatusFilter?.value||"CURRENT");updateEditState()}
 function saveSettings(){settings.supabaseUrl=setSupabaseUrl.value.trim();settings.supabaseKey=setSupabaseKey.value.trim();settings.sheetApi=setSheetApi.value.trim();settings.telegramWebhook=setTelegram.value.trim();settings.domainGroupChatId=setDomainGroupChat.value.trim();settings.domainMention=setDomainMention.value.trim()||"@lee_web";localStorage.setItem("tm_settings",JSON.stringify(settings));initClient();toast("Đã lưu setup","#2e7d32");loadMembers()}
 function unlockEdit(){if(editCode.value===settings.editCode){canEdit=true;localStorage.setItem("tm_canEdit","1");updateEditState();renderCalendarOnly();toast("Edit unlocked","#2e7d32")}else toast("Wrong code","#b71c1c")}
 function updateEditState(){editState.textContent=canEdit?"✅ Đang mở quyền edit":"🔒 Chỉ xem"}
-function showPage(page){document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("active",b.dataset.page===page));["queue","calendar","workload","report","members","logs","setup"].forEach(p=>document.getElementById(`page-${p}`).classList.toggle("hidden",p!==page));if(page==="queue")loadQueue();if(page==="calendar")render();if(page==="workload")renderWorkload();if(page==="report")renderReport();if(page==="members")loadMembers();if(page==="logs")loadAuditLogs()}
+function showPage(page){document.querySelectorAll(".nav button").forEach(b=>{if(page==="queue"){if(!b.dataset.queueFilter)b.classList.toggle("active",b.dataset.page==="queue")}else{b.classList.toggle("active",b.dataset.page===page&&!b.dataset.queueFilter)}});if(page!=="queue")document.querySelectorAll(".nav [data-queue-filter]").forEach(btn=>btn.classList.remove("active"));["queue","calendar","workload","report","members","logs","setup"].forEach(p=>document.getElementById(`page-${p}`).classList.toggle("hidden",p!==page));if(page==="queue")loadQueue();if(page==="calendar")render();if(page==="workload")renderWorkload();if(page==="report")renderReport();if(page==="members")loadMembers();if(page==="logs")loadAuditLogs()}
 
 async function sendTelegram(data){if(!settings.telegramWebhook)return;try{await fetch(settings.telegramWebhook,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(data)})}catch(e){console.error("Telegram error",e)}}
 async function logAction(action,taskId,sourceId,project,person,detail="",am=""){if(!supabaseClient)return;try{await supabaseClient.from("task_audit_logs").insert({action,task_id:taskId,source_id:sourceId,project,person,am,detail})}catch(e){console.warn("audit log failed",e)}}
@@ -683,10 +737,12 @@ function renderQueueKpis(){
   if(document.getElementById("kpiMonthAssigned"))kpiMonthAssigned.textContent=monthAssigned;
   if(document.getElementById("kpiMonthLabel"))kpiMonthLabel.textContent=month;
   if(document.getElementById("kpiToday"))kpiToday.textContent=Object.values(cache).flat().filter(t=>t.task_date===todayStr()).length;
+  updateQueueMenuCounts();
 }
 function safeSource(s){return String(s).replace(/"/g,"&quot;")}
 function renderQueue(){
   const st=queueStatusFilter.value;
+  if(document.getElementById("queueCurrentFilterChip"))queueCurrentFilterChip.textContent=queueFilterLabel(st);
   const pkg=queuePackageFilter.value;
   const q=queueSearch.value.trim().toLowerCase();
   const assignMonth=document.getElementById("queueAssignMonthFilter")?.value||"";
@@ -758,6 +814,7 @@ function renderQueue(){
   }).join("");
 
   renderQueueKpis();
+  updateQueueMenuCounts();
 }
 
 function inferTaskTypeByProjectCode(project, fallbackRow){
