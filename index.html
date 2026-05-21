@@ -517,6 +517,80 @@
   .queue-toolbar input,.queue-toolbar select,.queue-toolbar button{width:100%;max-width:none!important}
 }
 
+  
+/* ===== Simplified Queue UI Override ===== */
+.queue-command-center{
+  margin-bottom:14px!important;
+}
+.queue-overview-header{
+  margin-bottom:10px!important;
+}
+.queue-dynamic-summary{
+  display:grid!important;
+  grid-template-columns:1.4fr .9fr!important;
+  gap:12px!important;
+  margin-bottom:12px!important;
+}
+.queue-summary-panel{
+  background:#fff!important;
+  color:#111827!important;
+  border:1px solid var(--line)!important;
+  box-shadow:var(--shadow)!important;
+  padding:16px!important;
+}
+.queue-summary-panel h3{
+  color:#111827!important;
+}
+.queue-summary-panel p{
+  color:var(--muted)!important;
+}
+.queue-summary-grid{
+  display:flex!important;
+  flex-wrap:wrap!important;
+  gap:8px!important;
+  margin-top:12px!important;
+}
+.queue-summary-item{
+  flex:1 1 150px!important;
+  background:#fafafa!important;
+  border:1px solid #eee!important;
+  color:#111827!important;
+  padding:10px 12px!important;
+}
+.queue-summary-item b{
+  color:#111827!important;
+  font-size:22px!important;
+}
+.queue-summary-item span{
+  color:var(--muted)!important;
+}
+.queue-health-panel{
+  padding:16px!important;
+}
+.queue-health-panel h3{
+  font-size:15px!important;
+}
+.queue-dashboard{
+  display:none!important;
+}
+.queue-live-chip{
+  background:#f8fafc!important;
+  color:#475569!important;
+  border-color:#e2e8f0!important;
+}
+.queue-filter-chip{
+  background:#fff1eb!important;
+  color:#f05a28!important;
+}
+.queue-table-card{
+  margin-top:0!important;
+}
+@media(max-width:900px){
+  .queue-dynamic-summary{
+    grid-template-columns:1fr!important;
+  }
+}
+
   </style>
 </head>
 
@@ -580,8 +654,8 @@
       <div class="queue-command-center">
         <div class="queue-overview-header">
           <div class="queue-overview-title">
-            <h3 id="queueDynamicTitle">Task Queue Overview</h3>
-            <p id="queueDynamicSubtitle">Theo dõi realtime trạng thái task theo từng menu.</p>
+            <h3 id="queueDynamicTitle">Task Queue</h3>
+            <p id="queueDynamicSubtitle">Theo dõi trạng thái công việc theo từng nhóm.</p>
           </div>
           <div class="queue-overview-actions">
             <span class="queue-live-chip"><span class="queue-live-dot"></span> Live tracking</span>
@@ -606,50 +680,6 @@
             <div class="queue-health-row"><span>Domain đã báo</span><strong id="healthDomainDone">0</strong></div>
             <div class="queue-health-row"><span>Assign tháng đang chọn</span><strong id="healthMonthAssigned">0</strong></div>
             <div class="queue-health-row"><span>Task cần xử lý</span><strong id="healthActionNeeded">0</strong></div>
-          </div>
-        </div>
-
-        <div class="queue-dashboard">
-          <div class="queue-stat-card current" data-stat-filter="CURRENT" onclick="setQueueMenuFilter('CURRENT')" style="cursor:pointer">
-            <div class="queue-stat-label">Tiệm mới đủ info <span class="queue-mini-pill">current</span></div>
-            <span class="queue-stat-value" id="kpiCurrent">0</span>
-            <div class="queue-stat-sub">Đủ điều kiện để xử lý</div>
-            <div class="queue-progress" id="barCurrent"><span></span></div>
-          </div>
-
-          <div class="queue-stat-card unassigned" data-stat-filter="NEW" onclick="setQueueMenuFilter('NEW')" style="cursor:pointer">
-            <div class="queue-stat-label">Chưa assign <span class="queue-mini-pill">NEW</span></div>
-            <span class="queue-stat-value" id="kpiNew">0</span>
-            <div class="queue-stat-sub">Chưa vào calendar</div>
-            <div class="queue-progress yellow" id="barNew"><span></span></div>
-          </div>
-
-          <div class="queue-stat-card assigned" data-stat-filter="ASSIGNED" onclick="setQueueMenuFilter('ASSIGNED')" style="cursor:pointer">
-            <div class="queue-stat-label">Đã assign <span class="queue-mini-pill">ASSIGNED</span></div>
-            <span class="queue-stat-value" id="kpiAssigned">0</span>
-            <div class="queue-stat-sub">Đã có người/ngày</div>
-            <div class="queue-progress green" id="barAssigned"><span></span></div>
-          </div>
-
-          <div class="queue-stat-card pending-card" data-stat-filter="PENDING_INFO" onclick="setQueueMenuFilter('PENDING_INFO')" style="cursor:pointer">
-            <div class="queue-stat-label">Pending info <span class="queue-mini-pill">PENDING</span></div>
-            <span class="queue-stat-value" id="kpiPending">0</span>
-            <div class="queue-stat-sub">Thiếu thông tin</div>
-            <div class="queue-progress yellow" id="barPending"><span></span></div>
-          </div>
-
-          <div class="queue-stat-card skipped-card" data-stat-filter="SKIPPED" onclick="setQueueMenuFilter('SKIPPED')" style="cursor:pointer">
-            <div class="queue-stat-label">Skipped <span class="queue-mini-pill">SKIP</span></div>
-            <span class="queue-stat-value" id="kpiSkipped">0</span>
-            <div class="queue-stat-sub">Tạm bỏ qua</div>
-            <div class="queue-progress red" id="barSkipped"><span></span></div>
-          </div>
-
-          <div class="queue-stat-card month-card" data-stat-filter="ASSIGNED" onclick="setQueueMenuFilter('ASSIGNED')" style="cursor:pointer">
-            <div class="queue-stat-label">Assigned theo tháng <span class="queue-mini-pill" id="kpiMonthLabel">month</span></div>
-            <span class="queue-stat-value" id="kpiMonthAssigned">0</span>
-            <div class="queue-stat-sub">Theo tháng đang chọn</div>
-            <div class="queue-progress blue" id="barMonthAssigned"><span></span></div>
           </div>
         </div>
       </div>
