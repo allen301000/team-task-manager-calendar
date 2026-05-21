@@ -1055,7 +1055,69 @@ async function sendTelegram(data){if(!settings.telegramWebhook)return;try{await 
 async function logAction(action,taskId,sourceId,project,person,detail="",am=""){if(!supabaseClient)return;try{await supabaseClient.from("task_audit_logs").insert({action,task_id:taskId,source_id:sourceId,project,person,am,detail})}catch(e){console.warn("audit log failed",e)}}
 async function loadAuditLogs(){if(!requireDb())return;const {data,error}=await supabaseClient.from("task_audit_logs").select("*").order("created_at",{ascending:false}).limit(300);if(error){toast("Lỗi load logs: "+error.message,"#b71c1c");return}auditLogs=data||[];logsBody.innerHTML=auditLogs.map(l=>`<tr><td>${esc(new Date(l.created_at).toLocaleString())}</td><td>${esc(l.action)}</td><td>${esc(l.project||"")}</td><td>${esc(l.person||"")}</td><td>${esc(l.am||"")}</td><td>${esc(l.detail||"")}</td></tr>`).join("")}
 
-async function loadQueue(){if(!requireDb())return;const {data,error}=await supabaseClient.from("task_queue").select("*").order("updated_at",{ascending:false}).limit(5000);if(error){toast("Lỗi load queue: "+error.message,"#b71c1c");console.error(error);return}queueRows=data||[];renderQueueFilters();renderQueue();renderQueueKpis()}
+
+async function selectAllTaskQueueRows(){
+  if(!requireDb())return [];
+
+  const pageSize=1000;
+  let from=0;
+  let all=[];
+
+  while(true){
+    const to=from+pageSize-1;
+
+    const {data,error}=await supabaseClient
+      .from("task_queue")
+      .select("*")
+      .order("updated_at",{ascending:false})
+      .range(from,to);
+
+    if(error)throw error;
+
+    const rows=data||[];
+    all=all.concat(rows);
+
+    if(rows.length<pageSize)break;
+
+    from+=pageSize;
+  }
+
+  return all;
+}
+
+async function upsertTaskQueueInChunks(payload,chunkSize=500){
+  let total=0;
+
+  for(let i=0;i<payload.length;i+=chunkSize){
+    const chunk=payload.slice(i,i+chunkSize);
+
+    const {data,error}=await supabaseClient
+      .from("task_queue")
+      .upsert(chunk,{onConflict:"source_id",ignoreDuplicates:false})
+      .select("source_id");
+
+    if(error)throw error;
+
+    total+=chunk.length;
+  }
+
+  return total;
+}
+
+async function loadQueue(){
+  if(!requireDb())return;
+
+  try{
+    queueRows=await selectAllTaskQueueRows();
+    renderQueueFilters();
+    renderQueue();
+    renderQueueKpis();
+    logDebug("Loaded queue rows",queueRows.length);
+  }catch(error){
+    toast("Lỗi load queue: "+error.message,"#b71c1c");
+    console.error(error);
+  }
+}
 function renderQueueFilters(){const cur=queuePackageFilter.value;const ps=[...new Set(queueRows.map(r=>r.package_name||pkgFromId(r.source_id)).filter(Boolean))].sort();queuePackageFilter.innerHTML='<option value="">Tất cả gói</option>'+ps.map(p=>`<option>${esc(p)}</option>`).join("");queuePackageFilter.value=cur}
 function setProgress(id,value,max){
   const el=document.querySelector(`#${id} span`);
@@ -1270,6 +1332,38 @@ async function loadSheetAllProjectsJsonp(){
 
 
 
+
+async function selectTasksByDateRange(start,end){
+  if(!requireDb())return [];
+
+  const pageSize=1000;
+  let from=0;
+  let all=[];
+
+  while(true){
+    const to=from+pageSize-1;
+
+    const {data,error}=await supabaseClient
+      .from("tasks")
+      .select("source_id,text,person,am,task_date,type,priority,package_name,note")
+      .gte("task_date",start)
+      .lt("task_date",end)
+      .order("task_date",{ascending:true})
+      .range(from,to);
+
+    if(error)throw error;
+
+    const rows=data||[];
+    all=all.concat(rows);
+
+    if(rows.length<pageSize)break;
+
+    from+=pageSize;
+  }
+
+  return all;
+}
+
 async function syncAssignedFromCalendarByMonth(){
   if(!requireDb())return;
 
@@ -1293,14 +1387,7 @@ async function syncAssignedFromCalendarByMonth(){
   try{
     toast(`Đang sync assigned tháng ${month}...`, "#f05a28");
 
-    const {data:tasks,error:taskErr}=await supabaseClient
-      .from("tasks")
-      .select("source_id,text,person,am,task_date,type,priority,package_name,note")
-      .gte("task_date",start)
-      .lt("task_date",end)
-      .order("task_date",{ascending:true});
-
-    if(taskErr)throw taskErr;
+    const tasks=await selectTasksByDateRange(start,end);
 
     const valid=(tasks||[]).filter(t=>t.text);
 
@@ -1377,18 +1464,43 @@ async function syncAssignedFromCalendarByMonth(){
   }
 }
 
+
+async function selectAllCalendarTasks(){
+  if(!requireDb())return [];
+
+  const pageSize=1000;
+  let from=0;
+  let all=[];
+
+  while(true){
+    const to=from+pageSize-1;
+
+    const {data,error}=await supabaseClient
+      .from("tasks")
+      .select("source_id,text,person,am,task_date,type,priority,package_name,note")
+      .not("task_date","is",null)
+      .range(from,to);
+
+    if(error)throw error;
+
+    const rows=data||[];
+    all=all.concat(rows);
+
+    if(rows.length<pageSize)break;
+
+    from+=pageSize;
+  }
+
+  return all;
+}
+
 async function fixAssignedQueueStatus(){
   if(!requireDb())return;
 
   try{
     toast("Đang kiểm tra task đã assign...", "#f05a28");
 
-    const {data:tasks,error:taskErr}=await supabaseClient
-      .from("tasks")
-      .select("source_id,text,person,am,task_date,type,priority,package_name,note")
-      .not("task_date","is",null);
-
-    if(taskErr)throw taskErr;
+    const tasks=await selectAllCalendarTasks();
 
     const validTasks=(tasks||[]).filter(t=>t.text);
 
@@ -1495,11 +1607,7 @@ async function patchOldQueueDomainPackage(){
     for(let i=0;i<uniquePayload.length;i+=300){
       const chunk=uniquePayload.slice(i,i+300);
 
-      const {error}=await supabaseClient
-        .from("task_queue")
-        .upsert(chunk,{onConflict:"source_id",ignoreDuplicates:false});
-
-      if(error)throw error;
+      await upsertTaskQueueInChunks(chunk,500);
 
       updated+=chunk.length;
     }
@@ -1514,7 +1622,11 @@ async function patchOldQueueDomainPackage(){
   }
 }
 
-async function syncQueueFromApi(){clearDebug();console.group("[Task Queue] Sync từ Sheet API");logDebug("[Task Queue] Sync từ Sheet API");if(!requireDb()){console.groupEnd();return}if(!settings.sheetApi){toast("Chưa nhập Apps Script API URL","#b71c1c");console.groupEnd();return}try{toast("Đang sync từ Sheet...","#f05a28");const json=await loadSheetQueueJsonp(settings.sheetApi);logDebug("Raw API response",json);if(!json)throw new Error("Apps Script API không trả dữ liệu");if(json.success===false)throw new Error(json.error||"Apps Script API success=false");const rows=Array.isArray(json)?json:(json.data||[]);console.log("DOMAIN CHECK FROM GAS:",rows.map(r=>({project:r.project,domain:r.domain,Domain:r.Domain,domain_url:r.domain_url})));const nowIso=new Date().toISOString();await supabaseClient.from("task_queue").update({is_current:false}).neq("source_id","__never__");let payload=rows.map((r,idx)=>{const project=String(r.project||r.Project||r.Projects||"").trim();let sourceId=normalizeProjectId(project||r.source_id||"");if(!sourceId)sourceId="ROW-"+String(r.row_number||idx+1);return{source_id:sourceId,project,am:String(r.am||r.AM||"").trim(),start_date:toDateInput(r.start||r.Start||r.start_date),expired_date:toDateInput(r.expired||r.Expired||r.expired_date),template_url:String(r.template||r.template_url||r["Template màu"]||"").trim(),layout_url:String(r.layout||r.layout_url||r["Layout web"]||"").trim(),domain_url:String(r.domain||r.Domain||r.domain_url||r["Domain"]||r["Link web live"]||"").trim(),package_name:r.package_name||pkgFromProject(project),source_status:r.status||r.Status||"Doing",queue_status:"NEW",source_row:r.row_number?String(r.row_number):null,note:r.note||null,is_current:true,last_seen_at:nowIso,updated_at:nowIso}}).filter(r=>r.source_id&&r.project);const seen=new Set();payload=payload.filter(x=>{if(seen.has(x.source_id)){logDebug("Duplicate source_id skipped",x.source_id);return false}seen.add(x.source_id);return true});logDebug("Payload", {total:payload.length, firstFive:payload.slice(0,5)});if(!payload.length){toast("API không có task hợp lệ","#8a6d00");return}const {data,error}=await supabaseClient.from("task_queue").upsert(payload,{onConflict:"source_id",ignoreDuplicates:false}).select();logDebug("Supabase upsert result",{count:data?data.length:0,error});if(error)throw error;queueStatusFilter.value="CURRENT";toast(`Đã sync ${payload.length} task vào queue`,"#2e7d32");await loadQueue()}catch(e){console.error(e);logDebug("SYNC ERROR",e.message||e);toast("Sync lỗi: "+(e.message||e),"#b71c1c")}finally{console.groupEnd()}}
+async function syncQueueFromApi(){clearDebug();console.group("[Task Queue] Sync từ Sheet API");logDebug("[Task Queue] Sync từ Sheet API");if(!requireDb()){console.groupEnd();return}if(!settings.sheetApi){toast("Chưa nhập Apps Script API URL","#b71c1c");console.groupEnd();return}try{toast("Đang sync từ Sheet...","#f05a28");const json=await loadSheetQueueJsonp(settings.sheetApi);logDebug("Raw API response",json);if(!json)throw new Error("Apps Script API không trả dữ liệu");if(json.success===false)throw new Error(json.error||"Apps Script API success=false");const rows=Array.isArray(json)?json:(json.data||[]);console.log("DOMAIN CHECK FROM GAS:",rows.map(r=>({project:r.project,domain:r.domain,Domain:r.Domain,domain_url:r.domain_url})));const nowIso=new Date().toISOString();await supabaseClient.from("task_queue").update({is_current:false}).neq("source_id","__never__");let payload=rows.map((r,idx)=>{const project=String(r.project||r.Project||r.Projects||"").trim();let sourceId=normalizeProjectId(project||r.source_id||"");if(!sourceId)sourceId="ROW-"+String(r.row_number||idx+1);return{source_id:sourceId,project,am:String(r.am||r.AM||"").trim(),start_date:toDateInput(r.start||r.Start||r.start_date),expired_date:toDateInput(r.expired||r.Expired||r.expired_date),template_url:String(r.template||r.template_url||r["Template màu"]||"").trim(),layout_url:String(r.layout||r.layout_url||r["Layout web"]||"").trim(),domain_url:String(r.domain||r.Domain||r.domain_url||r["Domain"]||r["Link web live"]||"").trim(),package_name:r.package_name||pkgFromProject(project),source_status:r.status||r.Status||"Doing",queue_status:"NEW",source_row:r.row_number?String(r.row_number):null,note:r.note||null,is_current:true,last_seen_at:nowIso,updated_at:nowIso}}).filter(r=>r.source_id&&r.project);const seen=new Set();payload=payload.filter(x=>{if(seen.has(x.source_id)){logDebug("Duplicate source_id skipped",x.source_id);return false}seen.add(x.source_id);return true});logDebug("Payload", {total:payload.length, firstFive:payload.slice(0,5)});if(!payload.length){toast("API không có task hợp lệ","#8a6d00");return}const totalUpserted=await upsertTaskQueueInChunks(payload,500);
+logDebug("Supabase upsert result",{count:totalUpserted,error:null});
+queueStatusFilter.value="CURRENT";
+toast(`Đã sync ${payload.length} task vào queue`,"#2e7d32");
+await loadQueue()}catch(e){console.error(e);logDebug("SYNC ERROR",e.message||e);toast("Sync lỗi: "+(e.message||e),"#b71c1c")}finally{console.groupEnd()}}
 function loadSheetQueueJsonp(apiUrl){return new Promise((resolve,reject)=>{const cb="sheetQueueCb_"+Date.now()+"_"+Math.floor(Math.random()*100000);const sep=apiUrl.includes("?")?"&":"?";const url=`${apiUrl}${sep}action=queue&callback=${cb}`;logDebug("JSONP request URL",url);const s=document.createElement("script");const timer=setTimeout(()=>{cleanup();reject(new Error("Sheet API timeout sau 20s"))},20000);function cleanup(){clearTimeout(timer);delete window[cb];if(s.parentNode)s.parentNode.removeChild(s)}window[cb]=data=>{logDebug("JSONP callback received",data);cleanup();resolve(data)};s.onerror=()=>{cleanup();reject(new Error("Không load được Apps Script API"))};s.onload=()=>logDebug("JSONP script loaded");s.src=url;document.body.appendChild(s)})}
 
 function toggleQueueCheckAll(checked){
