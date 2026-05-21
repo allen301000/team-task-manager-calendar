@@ -84,6 +84,163 @@
     .log{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;background:#111827;color:#e5e7eb;border-radius:14px;padding:12px;min-height:120px;max-height:260px;overflow:auto;white-space:pre-wrap}
     .note{padding:10px 12px;background:#fffaf7;border:1px dashed #ffc7b3;border-radius:12px;color:#5f514b;font-size:13px;line-height:1.45}
     @media(max-width:1000px){.app{grid-template-columns:1fr} aside{position:relative;height:auto}.four,.two,.three{grid-template-columns:1fr}.week{display:none}.cal{grid-template-columns:1fr}.top{flex-direction:column;align-items:flex-start}.form{grid-template-columns:1fr}}
+  
+/* ===== Modern Task Queue UI Patch ===== */
+.queue-hero{
+  background:linear-gradient(135deg,#ffffff 0%,#fff5ef 100%);
+  border:1px solid #ffe1d3;
+}
+.queue-hero h2{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.queue-toolbar{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:16px;
+}
+.queue-toolbar-left,
+.queue-toolbar-right{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  align-items:center;
+}
+.queue-toolbar select,
+.queue-toolbar input{
+  min-height:42px;
+}
+.queue-status-select{
+  min-width:230px;
+  font-weight:700;
+  border-color:#ffc7b3;
+  background:#fffaf7;
+}
+.queue-month-input{
+  max-width:180px;
+}
+.queue-search-input{
+  max-width:360px;
+}
+.queue-dashboard{
+  display:grid;
+  grid-template-columns:repeat(6,minmax(150px,1fr));
+  gap:12px;
+  margin-bottom:16px;
+}
+.queue-stat-card{
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:18px;
+  padding:15px 16px;
+  box-shadow:var(--shadow);
+  position:relative;
+  overflow:hidden;
+}
+.queue-stat-card:before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:0;
+  bottom:0;
+  width:5px;
+  background:#e5e7eb;
+}
+.queue-stat-card.current:before{background:#f05a28}
+.queue-stat-card.unassigned:before{background:#f59e0b}
+.queue-stat-card.assigned:before{background:#34a853}
+.queue-stat-card.pending-card:before{background:#8a6d00}
+.queue-stat-card.skipped-card:before{background:#ef4444}
+.queue-stat-card.month-card:before{background:#6366f1}
+.queue-stat-label{
+  font-size:12px;
+  color:var(--muted);
+  display:flex;
+  justify-content:space-between;
+  gap:8px;
+  align-items:center;
+}
+.queue-stat-value{
+  display:block;
+  font-size:30px;
+  font-weight:900;
+  line-height:1;
+  margin-top:9px;
+  letter-spacing:-.04em;
+}
+.queue-stat-sub{
+  font-size:11px;
+  color:var(--muted);
+  margin-top:6px;
+}
+.queue-mini-pill{
+  font-size:10px;
+  border:1px solid #eee;
+  background:#fafafa;
+  border-radius:999px;
+  padding:2px 7px;
+  white-space:nowrap;
+}
+.queue-table-card{
+  padding:14px;
+}
+.queue-section-title{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  margin-bottom:10px;
+}
+.queue-section-title h3{
+  margin:0;
+  font-size:16px;
+}
+.queue-section-title .muted{
+  font-size:12px;
+}
+.queue-row-assigned{
+  background:#fbfffd;
+}
+.queue-row-current{
+  background:#fffaf7;
+}
+.queue-row-pending{
+  background:#fffdf4;
+}
+.queue-row-skipped{
+  background:#fff7f7;
+}
+.queue-domain-sub{
+  color:#8a6d00;
+  font-weight:700;
+}
+.queue-domain-real{
+  color:#0f766e;
+  font-weight:700;
+}
+.modern-select-wrap{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  align-items:center;
+}
+@media(max-width:1400px){
+  .queue-dashboard{grid-template-columns:repeat(3,minmax(150px,1fr))}
+}
+@media(max-width:800px){
+  .queue-dashboard{grid-template-columns:1fr 1fr}
+  .queue-toolbar{align-items:stretch}
+  .queue-toolbar-left,.queue-toolbar-right{width:100%}
+  .queue-status-select,.queue-month-input,.queue-search-input{max-width:none;width:100%}
+}
+@media(max-width:520px){
+  .queue-dashboard{grid-template-columns:1fr}
+}
+
   </style>
 </head>
 
@@ -120,7 +277,7 @@
 
   <main>
     <section id="page-queue">
-      <div class="top">
+      <div class="top queue-hero">
         <div><h2>📥 Task Queue</h2><div class="sub">Task mới từ Google Sheet, lọc theo rule và phân vào calendar.</div></div>
         <div class="tools">
           <button class="primary" onclick="syncQueueFromApi()">Sync từ Sheet API</button>
@@ -134,27 +291,65 @@
         </div>
       </div>
 
-      <div class="grid four" style="margin-bottom:12px">
-        <div class="card kpi"><span class="label">Tiệm mới đủ info</span><span class="value" id="kpiCurrent">0</span></div>
-        <div class="card kpi"><span class="label">Queue mới</span><span class="value" id="kpiNew">0</span></div>
-        <div class="card kpi"><span class="label">Đã assign</span><span class="value" id="kpiAssigned">0</span></div>
-        <div class="card kpi"><span class="label">Task hôm nay</span><span class="value" id="kpiToday">0</span></div>
+      <div class="queue-dashboard">
+        <div class="queue-stat-card current" onclick="queueStatusFilter.value='CURRENT';renderQueue()" style="cursor:pointer">
+          <div class="queue-stat-label">Tiệm mới đủ info <span class="queue-mini-pill">current</span></div>
+          <span class="queue-stat-value" id="kpiCurrent">0</span>
+          <div class="queue-stat-sub">Đủ điều kiện để xử lý</div>
+        </div>
+        <div class="queue-stat-card unassigned" onclick="queueStatusFilter.value='NEW';renderQueue()" style="cursor:pointer">
+          <div class="queue-stat-label">Queue mới <span class="queue-mini-pill">NEW</span></div>
+          <span class="queue-stat-value" id="kpiNew">0</span>
+          <div class="queue-stat-sub">Chưa vào calendar</div>
+        </div>
+        <div class="queue-stat-card assigned" onclick="queueStatusFilter.value='ASSIGNED';renderQueue()" style="cursor:pointer">
+          <div class="queue-stat-label">Đã assign <span class="queue-mini-pill">ASSIGNED</span></div>
+          <span class="queue-stat-value" id="kpiAssigned">0</span>
+          <div class="queue-stat-sub">Đã có người/ngày</div>
+        </div>
+        <div class="queue-stat-card pending-card" onclick="queueStatusFilter.value='PENDING_INFO';renderQueue()" style="cursor:pointer">
+          <div class="queue-stat-label">Pending info <span class="queue-mini-pill">PENDING</span></div>
+          <span class="queue-stat-value" id="kpiPending">0</span>
+          <div class="queue-stat-sub">Thiếu thông tin</div>
+        </div>
+        <div class="queue-stat-card skipped-card" onclick="queueStatusFilter.value='SKIPPED';renderQueue()" style="cursor:pointer">
+          <div class="queue-stat-label">Skipped <span class="queue-mini-pill">SKIP</span></div>
+          <span class="queue-stat-value" id="kpiSkipped">0</span>
+          <div class="queue-stat-sub">Tạm bỏ qua</div>
+        </div>
+        <div class="queue-stat-card month-card" onclick="queueStatusFilter.value='ASSIGNED';renderQueue()" style="cursor:pointer">
+          <div class="queue-stat-label">Assigned theo tháng <span class="queue-mini-pill" id="kpiMonthLabel">month</span></div>
+          <span class="queue-stat-value" id="kpiMonthAssigned">0</span>
+          <div class="queue-stat-sub">Theo tháng đang chọn</div>
+        </div>
       </div>
 
-      <div class="card">
-        <div class="tools" style="margin-bottom:10px">
-          <select id="queueStatusFilter" onchange="renderQueue()">
-            <option value="CURRENT">Tiệm mới đủ info</option>
-            <option value="NEW">Chưa assign</option>
-            <option value="ALL">Tất cả</option>
-            <option value="ASSIGNED">Đã assign</option>
-            <option value="PENDING_INFO">Pending info</option>
-            <option value="SKIPPED">Skipped</option>
-          </select>
-          <select id="queuePackageFilter" onchange="renderQueue()"><option value="">Tất cả gói</option></select>
-          <input id="queueSearch" placeholder="Tìm project / AM / source id..." oninput="renderQueue()" style="max-width:340px">
-          <input id="queueAssignMonthFilter" type="month" onchange="renderQueue()" title="Lọc đã assign theo tháng" style="max-width:180px">
-          
+      <div class="card queue-table-card">
+        <div class="queue-section-title">
+          <div>
+            <h3>Danh sách Queue</h3>
+            <div class="muted" id="queueResultSummary">Đang hiển thị 0 project</div>
+          </div>
+          <div class="muted">Chuột phải vào dòng để thao tác nhanh</div>
+        </div>
+
+        <div class="queue-toolbar">
+          <div class="queue-toolbar-left">
+            <select id="queueStatusFilter" class="queue-status-select" onchange="renderQueue()">
+              <option value="CURRENT">📥 Tiệm mới đủ info</option>
+              <option value="NEW">🟡 Chưa assign</option>
+              <option value="ALL">📚 Tất cả</option>
+              <option value="ASSIGNED">✅ Đã assign</option>
+              <option value="PENDING_INFO">⚠️ Pending info</option>
+              <option value="SKIPPED">⛔ Skipped</option>
+            </select>
+            <select id="queuePackageFilter" onchange="renderQueue()"><option value="">Tất cả gói</option></select>
+            <input id="queueAssignMonthFilter" class="queue-month-input" type="month" onchange="renderQueue()" title="Lọc theo tháng assign">
+            <input id="queueSearch" class="queue-search-input" placeholder="Tìm project / AM / source id..." oninput="renderQueue()">
+          </div>
+          <div class="queue-toolbar-right">
+            <button class="ghost" onclick="queueSearch.value='';queuePackageFilter.value='';queueAssignMonthFilter.value='';renderQueue()">Clear filter</button>
+          </div>
         </div>
 
         <div class="wrap">
@@ -468,17 +663,102 @@ async function loadAuditLogs(){if(!requireDb())return;const {data,error}=await s
 
 async function loadQueue(){if(!requireDb())return;const {data,error}=await supabaseClient.from("task_queue").select("*").order("updated_at",{ascending:false}).limit(5000);if(error){toast("Lỗi load queue: "+error.message,"#b71c1c");console.error(error);return}queueRows=data||[];renderQueueFilters();renderQueue();renderQueueKpis()}
 function renderQueueFilters(){const cur=queuePackageFilter.value;const ps=[...new Set(queueRows.map(r=>r.package_name||pkgFromId(r.source_id)).filter(Boolean))].sort();queuePackageFilter.innerHTML='<option value="">Tất cả gói</option>'+ps.map(p=>`<option>${esc(p)}</option>`).join("");queuePackageFilter.value=cur}
-function renderQueueKpis(){kpiCurrent.textContent=queueRows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW").length;kpiNew.textContent=queueRows.filter(r=>(r.queue_status||"NEW")==="NEW").length;kpiAssigned.textContent=queueRows.filter(r=>r.queue_status==="ASSIGNED").length;kpiToday.textContent=Object.values(cache).flat().filter(t=>t.task_date===todayStr()).length}
-function safeSource(s){return String(s).replace(/"/g,"&quot;")}
-function renderQueue(){const st=queueStatusFilter.value,pkg=queuePackageFilter.value,q=queueSearch.value.trim().toLowerCase();let rows=[...queueRows];if(st==="CURRENT")rows=rows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW");else if(st!=="ALL")rows=rows.filter(r=>(r.queue_status||"NEW")===st);if(pkg)rows=rows.filter(r=>(r.package_name||pkgFromId(r.source_id))===pkg);if(q)rows=rows.filter(r=>[r.source_id,r.project,r.am,r.package_name].join(" ").toLowerCase().includes(q));
+function renderQueueKpis(){
+  const month=document.getElementById("queueAssignMonthFilter")?.value||`${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,"0")}`;
+  const currentCount=queueRows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW").length;
+  const newCount=queueRows.filter(r=>(r.queue_status||"NEW")==="NEW").length;
+  const assignedCount=queueRows.filter(r=>r.queue_status==="ASSIGNED").length;
+  const pendingCount=queueRows.filter(r=>r.queue_status==="PENDING_INFO").length;
+  const skippedCount=queueRows.filter(r=>r.queue_status==="SKIPPED").length;
+  const monthAssigned=queueRows.filter(r=>{
+    const m=String(r.assigned_month||r.assigned_date||"").slice(0,7);
+    return m===month&&r.queue_status==="ASSIGNED";
+  }).length;
 
-const assignMonth=document.getElementById("queueAssignMonthFilter")?.value||"";
-if(assignMonth){
-  rows=rows.filter(r=>String(r.assigned_date||"").slice(0,7)===assignMonth);
+  if(document.getElementById("kpiCurrent"))kpiCurrent.textContent=currentCount;
+  if(document.getElementById("kpiNew"))kpiNew.textContent=newCount;
+  if(document.getElementById("kpiAssigned"))kpiAssigned.textContent=assignedCount;
+  if(document.getElementById("kpiPending"))kpiPending.textContent=pendingCount;
+  if(document.getElementById("kpiSkipped"))kpiSkipped.textContent=skippedCount;
+  if(document.getElementById("kpiMonthAssigned"))kpiMonthAssigned.textContent=monthAssigned;
+  if(document.getElementById("kpiMonthLabel"))kpiMonthLabel.textContent=month;
+  if(document.getElementById("kpiToday"))kpiToday.textContent=Object.values(cache).flat().filter(t=>t.task_date===todayStr()).length;
 }
+function safeSource(s){return String(s).replace(/"/g,"&quot;")}
+function renderQueue(){
+  const st=queueStatusFilter.value;
+  const pkg=queuePackageFilter.value;
+  const q=queueSearch.value.trim().toLowerCase();
+  const assignMonth=document.getElementById("queueAssignMonthFilter")?.value||"";
 
-queueBody.innerHTML=rows.map(r=>{const st=r.queue_status||"NEW",pn=r.package_name||pkgFromId(r.source_id);return `<tr oncontextmenu="openQueueContextMenu(event,\'${safeSource(r.source_id)}\')"><td><input type="checkbox" class="queue-domain-check" value="${esc(r.source_id)}"></td><td><b>${esc(r.source_id)}</b></td><td><b>${esc(r.project)}</b><div class="muted">${esc(r.note||"")}</div></td><td>${esc(r.am||"")}</td><td>${esc(r.start_date||"")}</td><td>${esc(r.expired_date||"")}</td><td>${esc(r.domain_url||"sub")}</td><td>${r.domain_notified?`<span class="badge assigned">Đã báo</span><div class="muted">${esc(r.domain_notified_at?new Date(r.domain_notified_at).toLocaleString():"")}</div>`:`<span class="badge pending">Chưa báo</span>`}</td><td><span class="badge">${esc(pn)}</span></td><td>${r.template_url?`<a href="${esc(r.template_url)}" target="_blank">Open</a>`:""}</td><td>${r.layout_url?`<a href="${esc(r.layout_url)}" target="_blank">Open</a>`:""}</td><td><span class="badge ${st==="ASSIGNED"?"assigned":st==="PENDING_INFO"?"pending":st==="SKIPPED"?"urgent":"new"}">${esc(st)}</span></td><td>${esc(r.assigned_month||String(r.assigned_date||"").slice(0,7)||"")}</td><td>${esc(r.assigned_month_note||"")}</td><td><button class="primary" onclick='openAssign("${safeSource(r.source_id)}")'>Assign</button> <button class="ghost" onclick='skipQueue("${safeSource(r.source_id)}")'>Skip</button> ${st==="ASSIGNED"?`<button class="warn" onclick='unassignQueue("${safeSource(r.source_id)}")'>Unassign</button>`:""}</td></tr>`}).join("")}
+  let rows=[...queueRows];
 
+  if(st==="CURRENT"){
+    rows=rows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW");
+  }else if(st!=="ALL"){
+    rows=rows.filter(r=>(r.queue_status||"NEW")===st);
+  }
+
+  if(pkg){
+    rows=rows.filter(r=>(r.package_name||pkgFromProject(r.project||r.source_id))===pkg);
+  }
+
+  if(assignMonth){
+    rows=rows.filter(r=>{
+      const m=String(r.assigned_month||r.assigned_date||"").slice(0,7);
+      return m===assignMonth;
+    });
+  }
+
+  if(q){
+    rows=rows.filter(r=>[
+      r.source_id,
+      r.project,
+      r.am,
+      r.package_name,
+      r.domain_url,
+      r.assigned_person,
+      r.assigned_month
+    ].join(" ").toLowerCase().includes(q));
+  }
+
+  if(document.getElementById("queueResultSummary")){
+    const label=queueStatusFilter.options[queueStatusFilter.selectedIndex]?.textContent||"Queue";
+    queueResultSummary.textContent=`${label}: ${rows.length} project`;
+  }
+
+  queueBody.innerHTML=rows.map(r=>{
+    const st=r.queue_status||"NEW";
+    const pn=r.package_name||pkgFromProject(r.project||r.source_id);
+    const domain=String(r.domain_url||"").trim();
+    const rowCls=st==="ASSIGNED"?"queue-row-assigned":st==="PENDING_INFO"?"queue-row-pending":st==="SKIPPED"?"queue-row-skipped":r.is_current?"queue-row-current":"";
+    const assignedMonth=String(r.assigned_month||r.assigned_date||"").slice(0,7);
+
+    return `<tr class="${rowCls}" oncontextmenu="openQueueContextMenu(event,'${safeSource(r.source_id)}')">
+      <td><input type="checkbox" class="queue-domain-check" value="${esc(r.source_id)}"></td>
+      <td><b>${esc(r.source_id)}</b></td>
+      <td><b>${esc(r.project)}</b><div class="muted">${esc(r.note||"")}</div></td>
+      <td>${esc(r.am||"")}</td>
+      <td>${esc(r.start_date||"")}</td>
+      <td>${esc(r.expired_date||"")}</td>
+      <td>${domain?`<span class="queue-domain-real">${esc(domain)}</span>`:`<span class="queue-domain-sub">sub</span>`}</td>
+      <td>${r.domain_notified?`<span class="badge assigned">Đã báo</span><div class="muted">${esc(r.domain_notified_at?new Date(r.domain_notified_at).toLocaleString():"")}</div>`:`<span class="badge pending">Chưa báo</span>`}</td>
+      <td><span class="badge">${esc(pn)}</span></td>
+      <td>${r.template_url?`<a href="${esc(r.template_url)}" target="_blank">Open</a>`:""}</td>
+      <td>${r.layout_url?`<a href="${esc(r.layout_url)}" target="_blank">Open</a>`:""}</td>
+      <td><span class="badge ${st==="ASSIGNED"?"assigned":st==="PENDING_INFO"?"pending":st==="SKIPPED"?"urgent":"new"}">${esc(st)}</span></td>
+      <td>${esc(assignedMonth||"")}</td>
+      <td>${esc(r.assigned_month_note||"")}</td>
+      <td>
+        <button class="primary" onclick='openAssign("${safeSource(r.source_id)}")'>Assign</button>
+        <button class="ghost" onclick='skipQueue("${safeSource(r.source_id)}")'>Skip</button>
+        ${st==="ASSIGNED"?`<button class="warn" onclick='unassignQueue("${safeSource(r.source_id)}")'>Unassign</button>`:""}
+      </td>
+    </tr>`;
+  }).join("");
+
+  renderQueueKpis();
+}
 
 function inferTaskTypeByProjectCode(project, fallbackRow){
   const text=String(project||"").trim().toUpperCase();
