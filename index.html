@@ -2143,6 +2143,66 @@ async function assignQueueTask(){if(!requireDb()||!selectedQueue)return;const pe
 async function markQueuePending(){if(!requireDb()||!selectedQueue)return;await supabaseClient.from("task_queue").update({queue_status:"PENDING_INFO",updated_at:new Date().toISOString()}).eq("source_id",selectedQueue.source_id);closeModal("assignModal");await loadQueue()}
 
 
+
+function sleep(ms=0){
+  return new Promise(resolve=>setTimeout(resolve,ms));
+}
+
+function chunkList(arr,size){
+  const chunks=[];
+  for(let i=0;i<arr.length;i+=size){
+    chunks.push(arr.slice(i,i+size));
+  }
+  return chunks;
+}
+
+async function sendBulkAssignNotifications(rows, insertedMap){
+  const chunks=chunkList(rows,5);
+
+  for(let i=0;i<chunks.length;i++){
+    await Promise.all(chunks[i].map(async item=>{
+      const row=item.row;
+      const plan=item.plan;
+      const taskId=insertedMap[item.source_id]||null;
+
+      const webMember=memberByName(plan.person);
+      const amMember=memberByName(item.am);
+
+      const msg=
+        `Project: ${item.text}\n`+
+        `Type: ${item.type}\n\n`+
+        `Member: ${plan.person}\n`+
+        `AM: ${item.am}\n`+
+        `📅 ${plan.date}`;
+
+      await sendTelegram({
+        event:"new",
+        person:plan.person,
+        person_chat_id:webMember?.telegram_chat_id||"",
+        am:item.am,
+        am_chat_id:amMember?.telegram_chat_id||"",
+        type:item.type,
+        message:msg
+      });
+
+      await logAction(
+        "assign_bulk",
+        taskId,
+        item.source_id,
+        item.text,
+        plan.person,
+        `Bulk assigned to ${plan.person} / AM ${item.am} / Date ${plan.date}`,
+        item.am
+      );
+    }));
+
+    if((i+1)%3===0){
+      toast(`Đã gửi thông báo ${Math.min((i+1)*5,rows.length)}/${rows.length}`, "#f05a28");
+      await sleep(60);
+    }
+  }
+}
+
 async function getBulkAssignPlan(count){
   const team=webMembers();
 
@@ -2353,7 +2413,7 @@ async function bulkAssignSelected(){
     .map(cb=>cb.value);
 
   if(!selectedIds.length){
-    toast("Chưa chọn project nào để assign hàng loạt", "#8a6d00");
+    toast("Chưa chọn project nào để assign batch", "#8a6d00");
     return;
   }
 
@@ -2366,63 +2426,159 @@ async function bulkAssignSelected(){
     return;
   }
 
-  const ok=confirm(
-    `Assign batch ${selectedRows.length} project?
+  selectedRows=sortQueuePriorityThenSheet
+    ? sortQueuePriorityThenSheet(selectedRows)
+    : sortBySheetOrder(selectedRows);
 
-`+
-    `Hệ thống sẽ tự chọn Date + Person theo Sort ID team như logic assign hiện tại.`
+  const ok=confirm(
+    `Assign batch ${selectedRows.length} project?\n\n`+
+    `Hệ thống sẽ tự chia theo thứ tự team và tự qua ngày tiếp theo khi đủ người.`
   );
 
   if(!ok)return;
 
-  const results=[];
-  const failed=[];
+  const startedAt=Date.now();
 
-  toast("Đang assign hàng loạt...", "#f05a28");
+  try{
+    toast(`Đang lập kế hoạch assign ${selectedRows.length} task...`, "#f05a28");
 
-  const plan=await getBulkAssignPlan(selectedRows.length);
+    const plan=await getBulkAssignPlan(selectedRows.length);
+    const nowIso=new Date().toISOString();
 
-  console.table(selectedRows.map((row,idx)=>({
-    project:row.project,
-    person:plan[idx]?.person,
-    date:plan[idx]?.date
-  })));
+    const prepared=selectedRows.map((row,idx)=>{
+      const p=plan[idx];
+      const text=String(row.project||"").trim();
+      const sourceId=row.source_id;
+      const type=inferType(row);
+      const am=row.am||"None";
+      const packageName=row.package_name||pkgFromProject(text);
 
-  for(let idx=0;idx<selectedRows.length;idx++){
-    const row=selectedRows[idx];
+      return {
+        row,
+        plan:p,
+        source_id:sourceId,
+        text,
+        type,
+        am,
+        package_name:packageName,
+        taskPayload:{
+          source_id:sourceId,
+          task_date:p.date,
+          text,
+          person:p.person,
+          type,
+          am,
+          done:false,
+          sort_order:999,
+          priority:"Normal",
+          package_name:packageName,
+          note:row.note||null
+        },
+        queuePayload:{
+          source_id:sourceId,
+          project:text,
+          am:row.am||null,
+          start_date:row.start_date||null,
+          expired_date:row.expired_date||null,
+          template_url:row.template_url||null,
+          layout_url:row.layout_url||null,
+          domain_url:row.domain_url||null,
+          package_name:packageName,
+          source_status:row.source_status||"Doing",
+          source_row:row.source_row||null,
+          queue_status:"ASSIGNED",
+          is_current:false,
+          assigned_person:p.person,
+          assigned_date:p.date,
+          assigned_month:String(p.date).slice(0,7),
+          assigned_month_note:`Assigned trong Calendar tháng ${String(p.date).slice(0,7)}`,
+          priority:"Normal",
+          note:row.note||null,
+          updated_at:nowIso,
+          last_seen_at:nowIso
+        }
+      };
+    });
 
-    try{
-      const res=await assignQueueRowAuto(row,plan[idx]);
-      results.push(res);
-    }catch(e){
-      console.error("Bulk assign failed", row, e);
-      failed.push({
-        project:row.project||row.source_id,
-        error:e.message||String(e)
-      });
+    console.table(prepared.slice(0,30).map(x=>({
+      project:x.text,
+      person:x.plan.person,
+      date:x.plan.date,
+      type:x.type
+    })));
+
+    const sourceIds=prepared.map(x=>x.source_id);
+
+    toast("Đang xóa task cũ nếu có...", "#f05a28");
+
+    for(const chunk of chunkList(sourceIds,300)){
+      const {error}=await supabaseClient
+        .from("tasks")
+        .delete()
+        .in("source_id",chunk);
+
+      if(error)throw error;
+
+      await sleep(0);
     }
-  }
 
-  document
-    .querySelectorAll(".queue-domain-check")
-    .forEach(cb=>cb.checked=false);
+    toast("Đang thêm task vào Calendar...", "#f05a28");
 
-  await Promise.all([loadQueue(),render()]);
+    const insertedMap={};
 
-  if(results.length){
-    const lastDate=results[results.length-1].taskDate;
+    for(const chunk of chunkList(prepared.map(x=>x.taskPayload),300)){
+      const {data,error}=await supabaseClient
+        .from("tasks")
+        .insert(chunk)
+        .select("id,source_id");
+
+      if(error)throw error;
+
+      (data||[]).forEach(t=>{
+        insertedMap[t.source_id]=t.id;
+      });
+
+      await sleep(0);
+    }
+
+    toast("Đang cập nhật Queue assigned...", "#f05a28");
+
+    for(const chunk of chunkList(prepared.map(x=>x.queuePayload),300)){
+      const {error}=await supabaseClient
+        .from("task_queue")
+        .upsert(chunk,{onConflict:"source_id",ignoreDuplicates:false});
+
+      if(error)throw error;
+
+      await sleep(0);
+    }
+
+    document
+      .querySelectorAll(".queue-domain-check")
+      .forEach(cb=>cb.checked=false);
+
+    const lastDate=prepared[prepared.length-1]?.plan?.date;
     const d=new Date(lastDate+"T00:00:00");
     if(!isNaN(d.getTime()))current=d;
-  }
 
-  if(failed.length){
-    toast(`Assign xong ${results.length}, lỗi ${failed.length}. Xem Console.`, "#b71c1c");
-    console.warn("Bulk assign failed list", failed);
-  }else{
-    toast(`Đã assign hàng loạt ${results.length} project`, "#2e7d32");
-  }
+    toast(`Đã assign ${prepared.length} task. Đang gửi Telegram...`, "#2e7d32");
 
-  showPage("calendar");
+    // Gửi notification theo cụm nhỏ để tránh treo trang.
+    sendBulkAssignNotifications(prepared, insertedMap)
+      .then(()=>console.log("Bulk Telegram/log done"))
+      .catch(e=>console.error("Bulk Telegram/log error",e));
+
+    await Promise.all([loadQueue(),render()]);
+
+    const sec=Math.round((Date.now()-startedAt)/1000);
+    toast(`Assign batch xong ${prepared.length} task trong ${sec}s`, "#2e7d32");
+
+    showPage("calendar");
+
+  }catch(e){
+    console.error("Bulk assign optimized failed", e);
+    toast("Lỗi assign batch: "+(e.message||e), "#b71c1c");
+  }
 }
 
 function openBulkAutoAssign(){
