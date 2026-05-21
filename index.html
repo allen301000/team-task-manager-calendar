@@ -126,6 +126,8 @@
           <button class="primary" onclick="syncQueueFromApi()">Sync từ Sheet API</button>
           <button onclick="loadQueue()">Reload Queue</button>
           <button class="ghost" onclick="patchOldQueueDomainPackage()">Update domain/gói cũ</button>
+          <button class="ghost" onclick="fixAssignedQueueStatus()">Fix trạng thái assigned</button>
+          <button class="ghost" onclick="syncAssignedFromCalendarByMonth()">Sync assigned theo tháng</button>
           <button class="primary" onclick="bulkAssignSelected()">Assign hàng loạt</button>
           <button class="warn" onclick="notifyManualDomain()">Thông báo domain thủ công</button>
           <button class="ghost" onclick="toast('Chức năng tạo domain tự động sẽ bổ sung sau', '#8a6d00')">Tạo domain tự động</button>
@@ -151,12 +153,13 @@
           </select>
           <select id="queuePackageFilter" onchange="renderQueue()"><option value="">Tất cả gói</option></select>
           <input id="queueSearch" placeholder="Tìm project / AM / source id..." oninput="renderQueue()" style="max-width:340px">
+          <input id="queueAssignMonthFilter" type="month" onchange="renderQueue()" title="Lọc đã assign theo tháng" style="max-width:180px">
           
         </div>
 
         <div class="wrap">
           <table>
-            <thead><tr><th><input type="checkbox" id="queueCheckAll" onchange="toggleQueueCheckAll(this.checked)"></th><th>Source ID</th><th>Project</th><th>AM</th><th>Start</th><th>Expired</th><th>Domain</th><th>Báo domain</th><th>Gói</th><th>Template</th><th>Layout</th><th>Status</th><th>Action</th></tr></thead>
+            <thead><tr><th><input type="checkbox" id="queueCheckAll" onchange="toggleQueueCheckAll(this.checked)"></th><th>Source ID</th><th>Project</th><th>AM</th><th>Start</th><th>Expired</th><th>Domain</th><th>Báo domain</th><th>Gói</th><th>Template</th><th>Layout</th><th>Status</th><th>Assign Month</th><th>Month Note</th><th>Action</th></tr></thead>
             <tbody id="queueBody"></tbody>
           </table>
         </div>
@@ -360,6 +363,7 @@ function pkgFromProject(project){
 
   if(/\*/.test(text))return "Gói Custom";
 
+  // Google Sheets MID(Project,6,1) = JS charAt(5)
   const c=text.charAt(5).toUpperCase();
 
   if(c==="0")return "Gói Menu + QR";
@@ -466,7 +470,14 @@ async function loadQueue(){if(!requireDb())return;const {data,error}=await supab
 function renderQueueFilters(){const cur=queuePackageFilter.value;const ps=[...new Set(queueRows.map(r=>r.package_name||pkgFromId(r.source_id)).filter(Boolean))].sort();queuePackageFilter.innerHTML='<option value="">Tất cả gói</option>'+ps.map(p=>`<option>${esc(p)}</option>`).join("");queuePackageFilter.value=cur}
 function renderQueueKpis(){kpiCurrent.textContent=queueRows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW").length;kpiNew.textContent=queueRows.filter(r=>(r.queue_status||"NEW")==="NEW").length;kpiAssigned.textContent=queueRows.filter(r=>r.queue_status==="ASSIGNED").length;kpiToday.textContent=Object.values(cache).flat().filter(t=>t.task_date===todayStr()).length}
 function safeSource(s){return String(s).replace(/"/g,"&quot;")}
-function renderQueue(){const st=queueStatusFilter.value,pkg=queuePackageFilter.value,q=queueSearch.value.trim().toLowerCase();let rows=[...queueRows];if(st==="CURRENT")rows=rows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW");else if(st!=="ALL")rows=rows.filter(r=>(r.queue_status||"NEW")===st);if(pkg)rows=rows.filter(r=>(r.package_name||pkgFromId(r.source_id))===pkg);if(q)rows=rows.filter(r=>[r.source_id,r.project,r.am,r.package_name].join(" ").toLowerCase().includes(q));queueBody.innerHTML=rows.map(r=>{const st=r.queue_status||"NEW",pn=r.package_name||pkgFromId(r.source_id);return `<tr oncontextmenu="openQueueContextMenu(event,\'${safeSource(r.source_id)}\')"><td><input type="checkbox" class="queue-domain-check" value="${esc(r.source_id)}"></td><td><b>${esc(r.source_id)}</b></td><td><b>${esc(r.project)}</b><div class="muted">${esc(r.note||"")}</div></td><td>${esc(r.am||"")}</td><td>${esc(r.start_date||"")}</td><td>${esc(r.expired_date||"")}</td><td>${esc(r.domain_url||"sub")}</td><td>${r.domain_notified?`<span class="badge assigned">Đã báo</span><div class="muted">${esc(r.domain_notified_at?new Date(r.domain_notified_at).toLocaleString():"")}</div>`:`<span class="badge pending">Chưa báo</span>`}</td><td><span class="badge">${esc(pn)}</span></td><td>${r.template_url?`<a href="${esc(r.template_url)}" target="_blank">Open</a>`:""}</td><td>${r.layout_url?`<a href="${esc(r.layout_url)}" target="_blank">Open</a>`:""}</td><td><span class="badge ${st==="ASSIGNED"?"assigned":st==="PENDING_INFO"?"pending":st==="SKIPPED"?"urgent":"new"}">${esc(st)}</span></td><td><button class="primary" onclick='openAssign("${safeSource(r.source_id)}")'>Assign</button> <button class="ghost" onclick='skipQueue("${safeSource(r.source_id)}")'>Skip</button> ${st==="ASSIGNED"?`<button class="warn" onclick='unassignQueue("${safeSource(r.source_id)}")'>Unassign</button>`:""}</td></tr>`}).join("")}
+function renderQueue(){const st=queueStatusFilter.value,pkg=queuePackageFilter.value,q=queueSearch.value.trim().toLowerCase();let rows=[...queueRows];if(st==="CURRENT")rows=rows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW");else if(st!=="ALL")rows=rows.filter(r=>(r.queue_status||"NEW")===st);if(pkg)rows=rows.filter(r=>(r.package_name||pkgFromId(r.source_id))===pkg);if(q)rows=rows.filter(r=>[r.source_id,r.project,r.am,r.package_name].join(" ").toLowerCase().includes(q));
+
+const assignMonth=document.getElementById("queueAssignMonthFilter")?.value||"";
+if(assignMonth){
+  rows=rows.filter(r=>String(r.assigned_date||"").slice(0,7)===assignMonth);
+}
+
+queueBody.innerHTML=rows.map(r=>{const st=r.queue_status||"NEW",pn=r.package_name||pkgFromId(r.source_id);return `<tr oncontextmenu="openQueueContextMenu(event,\'${safeSource(r.source_id)}\')"><td><input type="checkbox" class="queue-domain-check" value="${esc(r.source_id)}"></td><td><b>${esc(r.source_id)}</b></td><td><b>${esc(r.project)}</b><div class="muted">${esc(r.note||"")}</div></td><td>${esc(r.am||"")}</td><td>${esc(r.start_date||"")}</td><td>${esc(r.expired_date||"")}</td><td>${esc(r.domain_url||"sub")}</td><td>${r.domain_notified?`<span class="badge assigned">Đã báo</span><div class="muted">${esc(r.domain_notified_at?new Date(r.domain_notified_at).toLocaleString():"")}</div>`:`<span class="badge pending">Chưa báo</span>`}</td><td><span class="badge">${esc(pn)}</span></td><td>${r.template_url?`<a href="${esc(r.template_url)}" target="_blank">Open</a>`:""}</td><td>${r.layout_url?`<a href="${esc(r.layout_url)}" target="_blank">Open</a>`:""}</td><td><span class="badge ${st==="ASSIGNED"?"assigned":st==="PENDING_INFO"?"pending":st==="SKIPPED"?"urgent":"new"}">${esc(st)}</span></td><td>${esc(r.assigned_month||String(r.assigned_date||"").slice(0,7)||"")}</td><td>${esc(r.assigned_month_note||"")}</td><td><button class="primary" onclick='openAssign("${safeSource(r.source_id)}")'>Assign</button> <button class="ghost" onclick='skipQueue("${safeSource(r.source_id)}")'>Skip</button> ${st==="ASSIGNED"?`<button class="warn" onclick='unassignQueue("${safeSource(r.source_id)}")'>Unassign</button>`:""}</td></tr>`}).join("")}
 
 
 function inferTaskTypeByProjectCode(project, fallbackRow){
@@ -504,6 +515,190 @@ async function loadSheetAllProjectsJsonp(){
   return await loadSheetQueueJsonp(`${settings.sheetApi}${settings.sheetApi.includes("?")?"&":"?"}action=all_projects`);
 }
 
+
+
+async function syncAssignedFromCalendarByMonth(){
+  if(!requireDb())return;
+
+  const monthInput=document.getElementById("queueAssignMonthFilter");
+  let month=monthInput?.value||"";
+
+  if(!month){
+    const d=current instanceof Date ? current : new Date();
+    month=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+    if(monthInput)monthInput.value=month;
+  }
+
+  const start=`${month}-01`;
+  const endDate=new Date(start+"T00:00:00");
+  endDate.setMonth(endDate.getMonth()+1);
+  const end=endDate.toISOString().slice(0,10);
+
+  const ok=confirm(`Sync tất cả task đã assign trong Calendar tháng ${month} vào phần Đã assign?`);
+  if(!ok)return;
+
+  try{
+    toast(`Đang sync assigned tháng ${month}...`, "#f05a28");
+
+    const {data:tasks,error:taskErr}=await supabaseClient
+      .from("tasks")
+      .select("source_id,text,person,am,task_date,type,priority,package_name,note")
+      .gte("task_date",start)
+      .lt("task_date",end)
+      .order("task_date",{ascending:true});
+
+    if(taskErr)throw taskErr;
+
+    const valid=(tasks||[]).filter(t=>t.text);
+
+    if(!valid.length){
+      toast(`Không có task calendar trong tháng ${month}`, "#8a6d00");
+      return;
+    }
+
+    const nowIso=new Date().toISOString();
+
+    const payload=valid.map((t,idx)=>{
+      const project=String(t.text||"").trim();
+      const sourceId=String(t.source_id||normalizeProjectId(project)||`CAL-${month}-${idx+1}`).trim();
+
+      return {
+        source_id:sourceId,
+        project,
+        am:t.am||null,
+        package_name:t.package_name||pkgFromProject(project),
+        queue_status:"ASSIGNED",
+        is_current:false,
+        assigned_person:t.person||null,
+        assigned_date:t.task_date||null,
+        assigned_month:month,
+        assigned_month_note:`Assigned trong Calendar tháng ${month}`,
+        priority:t.priority||"Normal",
+        note:t.note||null,
+        updated_at:nowIso,
+        last_seen_at:nowIso
+      };
+    });
+
+    const seen=new Set();
+    const uniquePayload=payload.filter(r=>{
+      if(seen.has(r.source_id))return false;
+      seen.add(r.source_id);
+      return true;
+    });
+
+    let synced=0;
+
+    for(let i=0;i<uniquePayload.length;i+=300){
+      const chunk=uniquePayload.slice(i,i+300);
+
+      const {error}=await supabaseClient
+        .from("task_queue")
+        .upsert(chunk,{onConflict:"source_id",ignoreDuplicates:false});
+
+      if(error)throw error;
+
+      synced+=chunk.length;
+    }
+
+    await logAction(
+      "sync_assigned_month",
+      null,
+      "",
+      `Sync assigned ${month}`,
+      "",
+      `Synced ${synced} assigned tasks from Calendar month ${month}`,
+      ""
+    );
+
+    queueStatusFilter.value="ASSIGNED";
+    if(monthInput)monthInput.value=month;
+
+    toast(`Đã sync ${synced} task assigned tháng ${month}`, "#2e7d32");
+
+    await loadQueue();
+
+  }catch(e){
+    console.error(e);
+    toast("Lỗi sync assigned theo tháng: "+(e.message||e), "#b71c1c");
+  }
+}
+
+async function fixAssignedQueueStatus(){
+  if(!requireDb())return;
+
+  try{
+    toast("Đang kiểm tra task đã assign...", "#f05a28");
+
+    const {data:tasks,error:taskErr}=await supabaseClient
+      .from("tasks")
+      .select("source_id,text,person,am,task_date,type,priority,package_name,note")
+      .not("task_date","is",null);
+
+    if(taskErr)throw taskErr;
+
+    const validTasks=(tasks||[]).filter(t=>t.text);
+
+    if(!validTasks.length){
+      toast("Không có task Calendar để fix", "#8a6d00");
+      return;
+    }
+
+    let fixed=0;
+    const nowIso=new Date().toISOString();
+
+    const payload=validTasks.map((t,idx)=>{
+      const project=String(t.text||"").trim();
+      const sourceId=String(t.source_id||normalizeProjectId(project)||`CAL-${idx+1}`).trim();
+      const assignedMonth=String(t.task_date||"").slice(0,7);
+
+      return {
+        source_id:sourceId,
+        project,
+        am:t.am||null,
+        package_name:t.package_name||pkgFromProject(project),
+        queue_status:"ASSIGNED",
+        is_current:false,
+        assigned_person:t.person||null,
+        assigned_date:t.task_date||null,
+        assigned_month:assignedMonth,
+        assigned_month_note:assignedMonth?`Assigned trong Calendar tháng ${assignedMonth}`:"",
+        priority:t.priority||"Normal",
+        note:t.note||null,
+        updated_at:nowIso,
+        last_seen_at:nowIso
+      };
+    });
+
+    const seen=new Set();
+    const uniquePayload=payload.filter(r=>{
+      if(seen.has(r.source_id))return false;
+      seen.add(r.source_id);
+      return true;
+    });
+
+    for(let i=0;i<uniquePayload.length;i+=300){
+      const chunk=uniquePayload.slice(i,i+300);
+
+      const {error}=await supabaseClient
+        .from("task_queue")
+        .upsert(chunk,{onConflict:"source_id",ignoreDuplicates:false});
+
+      if(error)throw error;
+
+      fixed+=chunk.length;
+    }
+
+    toast(`Đã fix trạng thái assigned cho ${fixed} project`, "#2e7d32");
+    queueStatusFilter.value="ASSIGNED";
+    await loadQueue();
+
+  }catch(e){
+    console.error(e);
+    toast("Lỗi fix assigned: "+(e.message||e), "#b71c1c");
+  }
+}
+
 async function patchOldQueueDomainPackage(){
   if(!requireDb())return;
 
@@ -528,6 +723,7 @@ async function patchOldQueueDomainPackage(){
 
       return {
         source_id:sourceId,
+        project:project,
         domain_url:String(r.domain||r.Domain||r.domain_url||r["Domain"]||r["Link web live"]||"").trim(),
         package_name:pkgFromProject(project),
         updated_at:new Date().toISOString()
@@ -1032,7 +1228,7 @@ async function getNextAssignSlot(){
   };
 }
 
-async function assignQueueTask(){if(!requireDb()||!selectedQueue)return;const person=assignPerson.value,taskDate=assignDate.value,type=assignType.value,am=assignAM.value||"None",text=assignText.value.trim();if(!text||!person||!taskDate||!type){toast("Thiếu thông tin assign","#b71c1c");return}const sourceId=selectedQueue.source_id;const webMember=memberByName(person),amMember=memberByName(am);const payload={source_id:sourceId,task_date:taskDate,text,person,type,am,done:false,sort_order:999,priority:assignPriority.value,package_name:selectedQueue.package_name||pkgFromId(sourceId),note:assignNote.value||null};let taskId=null;const {data:exist,error:checkErr}=await supabaseClient.from("tasks").select("id").eq("source_id",sourceId).limit(1);if(checkErr){toast("Lỗi check task: "+checkErr.message,"#b71c1c");return}if(exist&&exist.length){taskId=exist[0].id;const {error}=await supabaseClient.from("tasks").update(payload).eq("id",taskId);if(error){toast("Lỗi update task: "+error.message,"#b71c1c");return}}else{const {data,error}=await supabaseClient.from("tasks").insert(payload).select("id").single();if(error){toast("Lỗi insert task: "+error.message,"#b71c1c");return}taskId=data?.id||null}const {error:qErr}=await supabaseClient.from("task_queue").update({queue_status:"ASSIGNED",assigned_person:person,assigned_date:taskDate,priority:assignPriority.value,updated_at:new Date().toISOString()}).eq("source_id",sourceId);if(qErr){toast("Task đã add nhưng lỗi update queue: "+qErr.message,"#b71c1c");return}const msg=`Project: ${text}\nType: ${type}\n\nMember: ${person}\nAM: ${am}\n📅 ${taskDate}`;await sendTelegram({event:"new",person,person_chat_id:webMember?.telegram_chat_id||"",am,am_chat_id:amMember?.telegram_chat_id||"",type,message:msg});await logAction("assign",taskId,sourceId,text,person,`Assigned to ${person} / AM ${am}`,am);closeModal("assignModal");toast("Đã add vào calendar","#2e7d32");const d=new Date(taskDate+"T00:00:00");if(!isNaN(d.getTime()))current=d;await Promise.all([loadQueue(),render()]);showPage("calendar")}
+async function assignQueueTask(){if(!requireDb()||!selectedQueue)return;const person=assignPerson.value,taskDate=assignDate.value,type=assignType.value,am=assignAM.value||"None",text=assignText.value.trim();if(!text||!person||!taskDate||!type){toast("Thiếu thông tin assign","#b71c1c");return}const sourceId=selectedQueue.source_id;const webMember=memberByName(person),amMember=memberByName(am);const payload={source_id:sourceId,task_date:taskDate,text,person,type,am,done:false,sort_order:999,priority:assignPriority.value,package_name:selectedQueue.package_name||pkgFromProject(text),note:assignNote.value||null};let taskId=null;const {data:exist,error:checkErr}=await supabaseClient.from("tasks").select("id").eq("source_id",sourceId).limit(1);if(checkErr){toast("Lỗi check task: "+checkErr.message,"#b71c1c");return}if(exist&&exist.length){taskId=exist[0].id;const {error}=await supabaseClient.from("tasks").update(payload).eq("id",taskId);if(error){toast("Lỗi update task: "+error.message,"#b71c1c");return}}else{const {data,error}=await supabaseClient.from("tasks").insert(payload).select("id").single();if(error){toast("Lỗi insert task: "+error.message,"#b71c1c");return}taskId=data?.id||null}const {error:qErr}=await supabaseClient.from("task_queue").update({queue_status:"ASSIGNED",is_current:false,assigned_person:person,assigned_date:taskDate,assigned_month:String(taskDate).slice(0,7),assigned_month_note:`Assigned trong Calendar tháng ${String(taskDate).slice(0,7)}`,priority:assignPriority.value,updated_at:new Date().toISOString()}).eq("source_id",sourceId);if(qErr){toast("Task đã add nhưng lỗi update queue: "+qErr.message,"#b71c1c");return}const msg=`Project: ${text}\nType: ${type}\n\nMember: ${person}\nAM: ${am}\n📅 ${taskDate}`;await sendTelegram({event:"new",person,person_chat_id:webMember?.telegram_chat_id||"",am,am_chat_id:amMember?.telegram_chat_id||"",type,message:msg});await logAction("assign",taskId,sourceId,text,person,`Assigned to ${person} / AM ${am}`,am);closeModal("assignModal");toast("Đã add vào calendar","#2e7d32");const d=new Date(taskDate+"T00:00:00");if(!isNaN(d.getTime()))current=d;await Promise.all([loadQueue(),render()]);showPage("calendar")}
 async function markQueuePending(){if(!requireDb()||!selectedQueue)return;await supabaseClient.from("task_queue").update({queue_status:"PENDING_INFO",updated_at:new Date().toISOString()}).eq("source_id",selectedQueue.source_id);closeModal("assignModal");await loadQueue()}
 
 async function assignQueueRowAuto(row){
@@ -1062,7 +1258,7 @@ async function assignQueueRowAuto(row){
     done:false,
     sort_order:999,
     priority:"Normal",
-    package_name:row.package_name||pkgFromId(sourceId),
+    package_name:row.package_name||pkgFromProject(text),
     note:row.note||null
   };
 
@@ -1101,8 +1297,11 @@ async function assignQueueRowAuto(row){
     .from("task_queue")
     .update({
       queue_status:"ASSIGNED",
+      is_current:false,
       assigned_person:person,
       assigned_date:taskDate,
+      assigned_month:String(taskDate).slice(0,7),
+      assigned_month_note:`Assigned trong Calendar tháng ${String(taskDate).slice(0,7)}`,
       priority:"Normal",
       updated_at:new Date().toISOString()
     })
