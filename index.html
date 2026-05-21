@@ -718,7 +718,7 @@ td .badge.urgent{margin-top:4px}
         <div class="tools">
           <button class="primary" onclick="syncQueueFromApi()">Sync Sheet</button>
           <button onclick="loadQueue()">Reload</button>
-          <button class="ghost" onclick="patchOldQueueDomainPackage()">Update full data cũ</button>
+          <button class="ghost" onclick="patchOldQueueDomainPackage()">Update data cũ</button>
           <button class="ghost" onclick="fixAssignedQueueStatus()">Fix assigned</button>
           <button class="ghost" onclick="syncAssignedFromCalendarByMonth()">Sync tháng</button>
           <button class="primary" onclick="bulkAssignSelected()">Assign batch</button>
@@ -1025,6 +1025,26 @@ function getSheetSourceIdFromRow(r, idx){
   if(!sourceId)sourceId="ROW-"+String(r?.row_number||r?.row||r?.source_row||idx+1);
   return sourceId;
 }
+
+function stripQueueStateForSheetBackfill(row){
+  const clean={...row};
+
+  // Backfill data cũ chỉ được cập nhật thông tin từ Sheet.
+  // Không được đụng tới trạng thái queue, nếu không nút Update data cũ sẽ làm mất Tiệm mới đủ info.
+  delete clean.is_current;
+  delete clean.force_current;
+  delete clean.queue_status;
+  delete clean.assigned_person;
+  delete clean.assigned_date;
+  delete clean.assigned_month;
+  delete clean.assigned_month_note;
+  delete clean.domain_notified;
+  delete clean.domain_notified_at;
+  delete clean.manual_added_at;
+
+  return clean;
+}
+
 function pkgFromProject(project){
   const text=String(project||"").trim();
 
@@ -1690,7 +1710,7 @@ async function patchOldQueueDomainPackage(){
     const nowIso=new Date().toISOString();
 
     let payload=rows
-      .map((r,idx)=>normalizeSheetQueueRow(r,idx,nowIso,false))
+      .map((r,idx)=>stripQueueStateForSheetBackfill(normalizeSheetQueueRow(r,idx,nowIso,false)))
       .filter(r=>r.source_id&&r.project);
 
     const seen=new Set();
@@ -1767,6 +1787,13 @@ async function syncQueueFromApi(){
         .filter(Boolean)
     );
 
+    // Nếu action=queue chưa cấu hình đúng hoặc trả rỗng, không được làm mất toàn bộ "Tiệm mới đủ info".
+    // Fallback: xem toàn bộ project từ all_projects là current, các dòng đã ASSIGNED/PENDING/SKIPPED vẫn bị ẩn bởi queue_status khi render.
+    const useAllProjectsAsCurrent=currentIds.size===0;
+    if(useAllProjectsAsCurrent){
+      logDebug("WARNING: action=queue không trả project nào. Fallback: dùng all_projects làm Tiệm mới đủ info.");
+    }
+
     await supabaseClient
       .from("task_queue")
       .update({is_current:false,updated_at:nowIso})
@@ -1775,7 +1802,7 @@ async function syncQueueFromApi(){
     let payload=allRows
       .map((r,idx)=>{
         const item=normalizeSheetQueueRow(r,idx,nowIso,false);
-        item.is_current=currentIds.has(item.source_id);
+        item.is_current=useAllProjectsAsCurrent ? true : currentIds.has(item.source_id);
         return item;
       })
       .filter(r=>r.source_id&&r.project);
@@ -1820,7 +1847,8 @@ async function syncQueueFromApi(){
 
     queueStatusFilter.value="CURRENT";
 
-    toast(`Đã sync ${payload.length} project từ Sheet, trong đó ${currentIds.size} tiệm mới đủ info`,"#2e7d32");
+    const currentCount=useAllProjectsAsCurrent ? payload.length : currentIds.size;
+    toast(`Đã sync ${payload.length} project từ Sheet, trong đó ${currentCount} tiệm mới đủ info`,"#2e7d32");
 
     await loadQueue();
 
