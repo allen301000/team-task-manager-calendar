@@ -662,6 +662,11 @@ th,td{padding:7px 8px!important}
   main{padding:10px!important}
 }
 
+  
+/* ===== Queue assignee/sort polish ===== */
+td .badge.urgent{margin-top:4px}
+.queue-row-assigned td{background:#fbfffd}
+
   </style>
 </head>
 
@@ -766,7 +771,7 @@ th,td{padding:7px 8px!important}
 
         <div class="wrap">
           <table>
-            <thead><tr><th><input type="checkbox" id="queueCheckAll" onchange="toggleQueueCheckAll(this.checked)"></th><th>Source ID</th><th>Project</th><th>AM</th><th>Start</th><th>Expired</th><th>Domain</th><th>Báo domain</th><th>Gói</th><th>Template</th><th>Layout</th><th>Status</th><th>Assign Month</th><th>Month Note</th><th>Action</th></tr></thead>
+            <thead><tr><th><input type="checkbox" id="queueCheckAll" onchange="toggleQueueCheckAll(this.checked)"></th><th>Source ID</th><th>Project</th><th>AM</th><th>Start</th><th>Expired</th><th>Domain</th><th>Báo domain</th><th>Gói</th><th>Template</th><th>Layout</th><th>Status</th><th>Assign Month</th><th>Assignee</th><th>Action</th></tr></thead>
             <tbody id="queueBody"></tbody>
           </table>
         </div>
@@ -1249,6 +1254,24 @@ function renderQueue(){
     ].join(" ").toLowerCase().includes(q));
   }
 
+  // Ưu tiên: chưa báo domain + chưa assign lên đầu.
+  rows.sort((a,b)=>{
+    const aNeeds=(!a.domain_notified)&&((a.queue_status||"NEW")!=="ASSIGNED")&&!a.assigned_person;
+    const bNeeds=(!b.domain_notified)&&((b.queue_status||"NEW")!=="ASSIGNED")&&!b.assigned_person;
+
+    if(aNeeds!==bNeeds)return aNeeds?-1:1;
+
+    const aAssigned=(a.queue_status==="ASSIGNED")||!!a.assigned_person;
+    const bAssigned=(b.queue_status==="ASSIGNED")||!!b.assigned_person;
+
+    if(aAssigned!==bAssigned)return aAssigned?1:-1;
+
+    const ad=String(a.start_date||a.updated_at||"");
+    const bd=String(b.start_date||b.updated_at||"");
+
+    return ad.localeCompare(bd);
+  });
+
   if(document.getElementById("queueResultSummary")){
     const label=queueStatusFilter.options[queueStatusFilter.selectedIndex]?.textContent||"Queue";
     queueResultSummary.textContent=`${label}: ${rows.length} project • Domain thật: ${rows.filter(x=>String(x.domain_url||"").trim()).length} • Đã báo domain: ${rows.filter(x=>x.domain_notified).length}`;
@@ -1264,7 +1287,9 @@ function renderQueue(){
     return `<tr class="${rowCls}" oncontextmenu="openQueueContextMenu(event,'${safeSource(r.source_id)}')">
       <td><input type="checkbox" class="queue-domain-check" value="${esc(r.source_id)}"></td>
       <td><b>${esc(r.source_id)}</b></td>
-      <td><b>${esc(r.project)}</b><div class="muted">${esc(r.note||"")}</div></td>
+      <td><b>${esc(r.project)}</b>
+        ${(!r.domain_notified&&st!=="ASSIGNED"&&!r.assigned_person)?`<div><span class="badge urgent">Cần báo domain / assign</span></div>`:""}
+        <div class="muted">${esc(r.note||"")}</div></td>
       <td>${esc(r.am||"")}</td>
       <td>${esc(r.start_date||"")}</td>
       <td>${esc(r.expired_date||"")}</td>
@@ -1275,7 +1300,11 @@ function renderQueue(){
       <td>${r.layout_url?`<a href="${esc(r.layout_url)}" target="_blank">Open</a>`:""}</td>
       <td><span class="badge ${st==="ASSIGNED"?"assigned":st==="PENDING_INFO"?"pending":st==="SKIPPED"?"urgent":"new"}">${esc(st)}</span></td>
       <td>${esc(assignedMonth||"")}</td>
-      <td>${esc(r.assigned_month_note||"")}</td>
+      <td>${
+        r.queue_status==="ASSIGNED"||r.assigned_person
+          ? `<b>${esc(r.assigned_person||"")}</b><div class="muted">${esc(r.assigned_date||"")}</div>`
+          : `<span class="muted">-</span>`
+      }</td>
       <td>
         <button class="primary" onclick='openAssign("${safeSource(r.source_id)}")'>Assign</button>
         <button class="ghost" onclick='skipQueue("${safeSource(r.source_id)}")'>Skip</button>
