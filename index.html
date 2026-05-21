@@ -251,6 +251,272 @@
 .nav-sub button.active .nav-count{background:#f05a28;color:#fff}
 .queue-filter-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:#fff1eb;color:#f05a28;font-weight:800;border:1px solid #ffc7b3}
 
+  
+/* ===== Professional Queue Command Center ===== */
+.queue-command-center{
+  margin-bottom:18px;
+}
+.queue-overview-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:14px;
+  margin-bottom:14px;
+}
+.queue-overview-title{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.queue-overview-title h3{
+  margin:0;
+  font-size:18px;
+  letter-spacing:-.02em;
+}
+.queue-overview-title p{
+  margin:0;
+  color:var(--muted);
+  font-size:12px;
+}
+.queue-overview-actions{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:8px;
+}
+.queue-live-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  border:1px solid #dbeafe;
+  background:#eff6ff;
+  color:#1d4ed8;
+  border-radius:999px;
+  padding:7px 10px;
+  font-size:12px;
+  font-weight:800;
+}
+.queue-live-dot{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:#22c55e;
+  box-shadow:0 0 0 4px rgba(34,197,94,.14);
+}
+.queue-dashboard{
+  display:grid!important;
+  grid-template-columns:repeat(12,1fr)!important;
+  gap:12px!important;
+  margin-bottom:16px!important;
+}
+.queue-stat-card{
+  grid-column:span 2;
+  min-height:136px;
+  background:linear-gradient(180deg,#fff,#fffaf7);
+  border:1px solid #eee;
+  border-radius:20px;
+  padding:16px;
+  box-shadow:0 10px 30px rgba(17,24,39,.055);
+  position:relative;
+  overflow:hidden;
+  transition:.18s ease;
+}
+.queue-stat-card:hover{
+  transform:translateY(-2px);
+  box-shadow:0 14px 36px rgba(17,24,39,.085);
+}
+.queue-stat-card.active-metric{
+  border-color:#f05a28;
+  box-shadow:0 14px 36px rgba(240,90,40,.14);
+}
+.queue-stat-card.wide{
+  grid-column:span 4;
+}
+.queue-stat-card.medium{
+  grid-column:span 3;
+}
+.queue-stat-card:before{
+  content:"";
+  position:absolute;
+  inset:0 auto 0 0;
+  width:5px;
+  background:#e5e7eb;
+}
+.queue-stat-card.current:before{background:#f05a28}
+.queue-stat-card.unassigned:before{background:#f59e0b}
+.queue-stat-card.assigned:before{background:#22c55e}
+.queue-stat-card.pending-card:before{background:#eab308}
+.queue-stat-card.skipped-card:before{background:#ef4444}
+.queue-stat-card.month-card:before{background:#6366f1}
+.queue-stat-card.domain-card:before{background:#14b8a6}
+.queue-stat-card.work-card:before{background:#0ea5e9}
+.queue-stat-label{
+  font-size:12px;
+  color:#6b7280;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  font-weight:700;
+}
+.queue-stat-value{
+  display:block;
+  font-size:36px;
+  line-height:1;
+  font-weight:950;
+  letter-spacing:-.055em;
+  margin-top:10px;
+  color:#111827;
+}
+.queue-stat-sub{
+  font-size:12px;
+  color:#6b7280;
+  margin-top:8px;
+  line-height:1.35;
+}
+.queue-mini-pill{
+  font-size:10px;
+  border:1px solid #eee;
+  background:#fff;
+  border-radius:999px;
+  padding:3px 8px;
+  white-space:nowrap;
+  color:#6b7280;
+  font-weight:900;
+}
+.queue-progress{
+  width:100%;
+  height:8px;
+  background:#f3f4f6;
+  border-radius:999px;
+  overflow:hidden;
+  margin-top:12px;
+}
+.queue-progress span{
+  display:block;
+  height:100%;
+  width:0%;
+  border-radius:999px;
+  background:#f05a28;
+  transition:width .25s ease;
+}
+.queue-progress.green span{background:#22c55e}
+.queue-progress.yellow span{background:#f59e0b}
+.queue-progress.red span{background:#ef4444}
+.queue-progress.blue span{background:#6366f1}
+.queue-progress.teal span{background:#14b8a6}
+.queue-dynamic-summary{
+  display:grid;
+  grid-template-columns:2fr 1fr;
+  gap:12px;
+  margin-bottom:16px;
+}
+.queue-summary-panel{
+  background:#111827;
+  color:#fff;
+  border-radius:20px;
+  padding:18px;
+  box-shadow:0 14px 40px rgba(17,24,39,.16);
+}
+.queue-summary-panel h3{
+  margin:0 0 8px;
+  font-size:18px;
+}
+.queue-summary-panel p{
+  margin:0;
+  color:#cbd5e1;
+  font-size:13px;
+  line-height:1.5;
+}
+.queue-summary-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:10px;
+  margin-top:14px;
+}
+.queue-summary-item{
+  background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:14px;
+  padding:12px;
+}
+.queue-summary-item b{
+  display:block;
+  font-size:20px;
+  line-height:1;
+}
+.queue-summary-item span{
+  display:block;
+  color:#cbd5e1;
+  font-size:11px;
+  margin-top:6px;
+}
+.queue-health-panel{
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:20px;
+  padding:18px;
+  box-shadow:var(--shadow);
+}
+.queue-health-panel h3{
+  margin:0 0 12px;
+  font-size:16px;
+}
+.queue-health-row{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  font-size:13px;
+  padding:9px 0;
+  border-bottom:1px solid #f3f4f6;
+}
+.queue-health-row:last-child{
+  border-bottom:0;
+}
+.queue-health-row strong{
+  font-weight:900;
+}
+.queue-toolbar{
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:18px;
+  padding:12px;
+  box-shadow:0 8px 26px rgba(17,24,39,.045);
+}
+.queue-filter-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:10px 14px;
+  border-radius:999px;
+  background:#fff1eb;
+  color:#f05a28;
+  font-weight:900;
+  border:1px solid #ffc7b3;
+}
+.queue-table-card{
+  border-radius:22px;
+}
+@media(max-width:1450px){
+  .queue-stat-card{grid-column:span 3}
+  .queue-stat-card.wide{grid-column:span 6}
+  .queue-stat-card.medium{grid-column:span 4}
+}
+@media(max-width:1050px){
+  .queue-dashboard{grid-template-columns:repeat(6,1fr)!important}
+  .queue-stat-card,.queue-stat-card.medium{grid-column:span 3}
+  .queue-stat-card.wide{grid-column:span 6}
+  .queue-dynamic-summary{grid-template-columns:1fr}
+}
+@media(max-width:720px){
+  .queue-dashboard{grid-template-columns:1fr!important}
+  .queue-stat-card,.queue-stat-card.medium,.queue-stat-card.wide{grid-column:span 1}
+  .queue-overview-header{flex-direction:column}
+  .queue-summary-grid{grid-template-columns:1fr}
+  .queue-toolbar-left,.queue-toolbar-right{width:100%}
+  .queue-toolbar input,.queue-toolbar select,.queue-toolbar button{width:100%;max-width:none!important}
+}
+
   </style>
 </head>
 
@@ -311,36 +577,80 @@
         </div>
       </div>
 
-      <div class="queue-dashboard">
-        <div class="queue-stat-card current" onclick="queueStatusFilter.value='CURRENT';renderQueue()" style="cursor:pointer">
-          <div class="queue-stat-label">Tiệm mới đủ info <span class="queue-mini-pill">current</span></div>
-          <span class="queue-stat-value" id="kpiCurrent">0</span>
-          <div class="queue-stat-sub">Đủ điều kiện để xử lý</div>
+      <div class="queue-command-center">
+        <div class="queue-overview-header">
+          <div class="queue-overview-title">
+            <h3 id="queueDynamicTitle">Task Queue Overview</h3>
+            <p id="queueDynamicSubtitle">Theo dõi realtime trạng thái task theo từng menu.</p>
+          </div>
+          <div class="queue-overview-actions">
+            <span class="queue-live-chip"><span class="queue-live-dot"></span> Live tracking</span>
+            <span class="queue-filter-chip" id="queueCurrentFilterChip">📥 Tiệm mới đủ info</span>
+          </div>
         </div>
-        <div class="queue-stat-card unassigned" onclick="queueStatusFilter.value='NEW';renderQueue()" style="cursor:pointer">
-          <div class="queue-stat-label">Queue mới <span class="queue-mini-pill">NEW</span></div>
-          <span class="queue-stat-value" id="kpiNew">0</span>
-          <div class="queue-stat-sub">Chưa vào calendar</div>
+
+        <div class="queue-dynamic-summary">
+          <div class="queue-summary-panel">
+            <h3 id="queueFocusTitle">📥 Tiệm mới đủ info</h3>
+            <p id="queueFocusText">Các project đang đủ điều kiện để team xử lý tiếp.</p>
+            <div class="queue-summary-grid">
+              <div class="queue-summary-item"><b id="focusTotal">0</b><span>Tổng trong tab</span></div>
+              <div class="queue-summary-item"><b id="focusDomainRate">0%</b><span>Tỉ lệ có domain</span></div>
+              <div class="queue-summary-item"><b id="focusAssignRate">0%</b><span>Tỉ lệ đã assign</span></div>
+            </div>
+          </div>
+
+          <div class="queue-health-panel">
+            <h3>Queue Health</h3>
+            <div class="queue-health-row"><span>Domain chưa báo</span><strong id="healthDomainPending">0</strong></div>
+            <div class="queue-health-row"><span>Domain đã báo</span><strong id="healthDomainDone">0</strong></div>
+            <div class="queue-health-row"><span>Assign tháng đang chọn</span><strong id="healthMonthAssigned">0</strong></div>
+            <div class="queue-health-row"><span>Task cần xử lý</span><strong id="healthActionNeeded">0</strong></div>
+          </div>
         </div>
-        <div class="queue-stat-card assigned" onclick="queueStatusFilter.value='ASSIGNED';renderQueue()" style="cursor:pointer">
-          <div class="queue-stat-label">Đã assign <span class="queue-mini-pill">ASSIGNED</span></div>
-          <span class="queue-stat-value" id="kpiAssigned">0</span>
-          <div class="queue-stat-sub">Đã có người/ngày</div>
-        </div>
-        <div class="queue-stat-card pending-card" onclick="queueStatusFilter.value='PENDING_INFO';renderQueue()" style="cursor:pointer">
-          <div class="queue-stat-label">Pending info <span class="queue-mini-pill">PENDING</span></div>
-          <span class="queue-stat-value" id="kpiPending">0</span>
-          <div class="queue-stat-sub">Thiếu thông tin</div>
-        </div>
-        <div class="queue-stat-card skipped-card" onclick="queueStatusFilter.value='SKIPPED';renderQueue()" style="cursor:pointer">
-          <div class="queue-stat-label">Skipped <span class="queue-mini-pill">SKIP</span></div>
-          <span class="queue-stat-value" id="kpiSkipped">0</span>
-          <div class="queue-stat-sub">Tạm bỏ qua</div>
-        </div>
-        <div class="queue-stat-card month-card" onclick="queueStatusFilter.value='ASSIGNED';renderQueue()" style="cursor:pointer">
-          <div class="queue-stat-label">Assigned theo tháng <span class="queue-mini-pill" id="kpiMonthLabel">month</span></div>
-          <span class="queue-stat-value" id="kpiMonthAssigned">0</span>
-          <div class="queue-stat-sub">Theo tháng đang chọn</div>
+
+        <div class="queue-dashboard">
+          <div class="queue-stat-card current" data-stat-filter="CURRENT" onclick="setQueueMenuFilter('CURRENT')" style="cursor:pointer">
+            <div class="queue-stat-label">Tiệm mới đủ info <span class="queue-mini-pill">current</span></div>
+            <span class="queue-stat-value" id="kpiCurrent">0</span>
+            <div class="queue-stat-sub">Đủ điều kiện để xử lý</div>
+            <div class="queue-progress" id="barCurrent"><span></span></div>
+          </div>
+
+          <div class="queue-stat-card unassigned" data-stat-filter="NEW" onclick="setQueueMenuFilter('NEW')" style="cursor:pointer">
+            <div class="queue-stat-label">Chưa assign <span class="queue-mini-pill">NEW</span></div>
+            <span class="queue-stat-value" id="kpiNew">0</span>
+            <div class="queue-stat-sub">Chưa vào calendar</div>
+            <div class="queue-progress yellow" id="barNew"><span></span></div>
+          </div>
+
+          <div class="queue-stat-card assigned" data-stat-filter="ASSIGNED" onclick="setQueueMenuFilter('ASSIGNED')" style="cursor:pointer">
+            <div class="queue-stat-label">Đã assign <span class="queue-mini-pill">ASSIGNED</span></div>
+            <span class="queue-stat-value" id="kpiAssigned">0</span>
+            <div class="queue-stat-sub">Đã có người/ngày</div>
+            <div class="queue-progress green" id="barAssigned"><span></span></div>
+          </div>
+
+          <div class="queue-stat-card pending-card" data-stat-filter="PENDING_INFO" onclick="setQueueMenuFilter('PENDING_INFO')" style="cursor:pointer">
+            <div class="queue-stat-label">Pending info <span class="queue-mini-pill">PENDING</span></div>
+            <span class="queue-stat-value" id="kpiPending">0</span>
+            <div class="queue-stat-sub">Thiếu thông tin</div>
+            <div class="queue-progress yellow" id="barPending"><span></span></div>
+          </div>
+
+          <div class="queue-stat-card skipped-card" data-stat-filter="SKIPPED" onclick="setQueueMenuFilter('SKIPPED')" style="cursor:pointer">
+            <div class="queue-stat-label">Skipped <span class="queue-mini-pill">SKIP</span></div>
+            <span class="queue-stat-value" id="kpiSkipped">0</span>
+            <div class="queue-stat-sub">Tạm bỏ qua</div>
+            <div class="queue-progress red" id="barSkipped"><span></span></div>
+          </div>
+
+          <div class="queue-stat-card month-card" data-stat-filter="ASSIGNED" onclick="setQueueMenuFilter('ASSIGNED')" style="cursor:pointer">
+            <div class="queue-stat-label">Assigned theo tháng <span class="queue-mini-pill" id="kpiMonthLabel">month</span></div>
+            <span class="queue-stat-value" id="kpiMonthAssigned">0</span>
+            <div class="queue-stat-sub">Theo tháng đang chọn</div>
+            <div class="queue-progress blue" id="barMonthAssigned"><span></span></div>
+          </div>
         </div>
       </div>
 
@@ -717,17 +1027,58 @@ async function loadAuditLogs(){if(!requireDb())return;const {data,error}=await s
 
 async function loadQueue(){if(!requireDb())return;const {data,error}=await supabaseClient.from("task_queue").select("*").order("updated_at",{ascending:false}).limit(5000);if(error){toast("Lỗi load queue: "+error.message,"#b71c1c");console.error(error);return}queueRows=data||[];renderQueueFilters();renderQueue();renderQueueKpis()}
 function renderQueueFilters(){const cur=queuePackageFilter.value;const ps=[...new Set(queueRows.map(r=>r.package_name||pkgFromId(r.source_id)).filter(Boolean))].sort();queuePackageFilter.innerHTML='<option value="">Tất cả gói</option>'+ps.map(p=>`<option>${esc(p)}</option>`).join("");queuePackageFilter.value=cur}
+function setProgress(id,value,max){
+  const el=document.querySelector(`#${id} span`);
+  if(!el)return;
+  const pct=max>0?Math.min(100,Math.round((value/max)*100)):0;
+  el.style.width=pct+"%";
+}
+
+function getQueueRowsByFilter(filterValue){
+  let rows=[...queueRows];
+
+  if(filterValue==="CURRENT"){
+    rows=rows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW");
+  }else if(filterValue&&filterValue!=="ALL"){
+    rows=rows.filter(r=>(r.queue_status||"NEW")===filterValue);
+  }
+
+  return rows;
+}
+
 function renderQueueKpis(){
   const month=document.getElementById("queueAssignMonthFilter")?.value||`${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,"0")}`;
-  const currentCount=queueRows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW").length;
-  const newCount=queueRows.filter(r=>(r.queue_status||"NEW")==="NEW").length;
-  const assignedCount=queueRows.filter(r=>r.queue_status==="ASSIGNED").length;
-  const pendingCount=queueRows.filter(r=>r.queue_status==="PENDING_INFO").length;
-  const skippedCount=queueRows.filter(r=>r.queue_status==="SKIPPED").length;
-  const monthAssigned=queueRows.filter(r=>{
+  const activeFilter=document.getElementById("queueStatusFilter")?.value||"CURRENT";
+
+  const allCount=queueRows.length||0;
+  const currentRows=getQueueRowsByFilter("CURRENT");
+  const newRows=getQueueRowsByFilter("NEW");
+  const assignedRows=getQueueRowsByFilter("ASSIGNED");
+  const pendingRows=getQueueRowsByFilter("PENDING_INFO");
+  const skippedRows=getQueueRowsByFilter("SKIPPED");
+
+  const currentCount=currentRows.length;
+  const newCount=newRows.length;
+  const assignedCount=assignedRows.length;
+  const pendingCount=pendingRows.length;
+  const skippedCount=skippedRows.length;
+
+  const monthAssignedRows=assignedRows.filter(r=>{
     const m=String(r.assigned_month||r.assigned_date||"").slice(0,7);
-    return m===month&&r.queue_status==="ASSIGNED";
-  }).length;
+    return m===month;
+  });
+  const monthAssigned=monthAssignedRows.length;
+
+  const focusRows=getQueueRowsByFilter(activeFilter);
+  const focusTotal=focusRows.length;
+  const focusWithDomain=focusRows.filter(r=>String(r.domain_url||"").trim()).length;
+  const focusAssigned=focusRows.filter(r=>r.queue_status==="ASSIGNED").length;
+  const focusDomainRate=focusTotal?Math.round((focusWithDomain/focusTotal)*100):0;
+  const focusAssignRate=focusTotal?Math.round((focusAssigned/focusTotal)*100):0;
+
+  const domainPending=queueRows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW"&&!r.domain_notified).length;
+  const domainDone=queueRows.filter(r=>r.domain_notified).length;
+  const actionNeeded=currentCount+pendingCount;
 
   if(document.getElementById("kpiCurrent"))kpiCurrent.textContent=currentCount;
   if(document.getElementById("kpiNew"))kpiNew.textContent=newCount;
@@ -737,6 +1088,41 @@ function renderQueueKpis(){
   if(document.getElementById("kpiMonthAssigned"))kpiMonthAssigned.textContent=monthAssigned;
   if(document.getElementById("kpiMonthLabel"))kpiMonthLabel.textContent=month;
   if(document.getElementById("kpiToday"))kpiToday.textContent=Object.values(cache).flat().filter(t=>t.task_date===todayStr()).length;
+
+  if(document.getElementById("focusTotal"))focusTotal.textContent=focusTotal;
+  if(document.getElementById("focusDomainRate"))focusDomainRate.textContent=focusDomainRate+"%";
+  if(document.getElementById("focusAssignRate"))focusAssignRate.textContent=focusAssignRate+"%";
+  if(document.getElementById("healthDomainPending"))healthDomainPending.textContent=domainPending;
+  if(document.getElementById("healthDomainDone"))healthDomainDone.textContent=domainDone;
+  if(document.getElementById("healthMonthAssigned"))healthMonthAssigned.textContent=monthAssigned;
+  if(document.getElementById("healthActionNeeded"))healthActionNeeded.textContent=actionNeeded;
+
+  const label=queueFilterLabel(activeFilter);
+  const descriptions={
+    CURRENT:"Các project đủ điều kiện đang chờ team xử lý, báo domain hoặc assign.",
+    NEW:"Các project chưa được assign vào calendar.",
+    ASSIGNED:"Các project đã được phân người và ngày làm.",
+    PENDING_INFO:"Các project đang thiếu thông tin cần AM/Sale bổ sung.",
+    SKIPPED:"Các project đã tạm bỏ qua hoặc chưa xử lý.",
+    ALL:"Toàn bộ dữ liệu task queue trong hệ thống."
+  };
+
+  if(document.getElementById("queueDynamicTitle"))queueDynamicTitle.textContent=label;
+  if(document.getElementById("queueDynamicSubtitle"))queueDynamicSubtitle.textContent=`Đang xem ${focusTotal} project trong tab này.`;
+  if(document.getElementById("queueFocusTitle"))queueFocusTitle.textContent=label;
+  if(document.getElementById("queueFocusText"))queueFocusText.textContent=descriptions[activeFilter]||descriptions.CURRENT;
+
+  document.querySelectorAll(".queue-stat-card[data-stat-filter]").forEach(card=>{
+    card.classList.toggle("active-metric",card.dataset.statFilter===activeFilter);
+  });
+
+  setProgress("barCurrent",currentCount,Math.max(allCount,1));
+  setProgress("barNew",newCount,Math.max(allCount,1));
+  setProgress("barAssigned",assignedCount,Math.max(allCount,1));
+  setProgress("barPending",pendingCount,Math.max(allCount,1));
+  setProgress("barSkipped",skippedCount,Math.max(allCount,1));
+  setProgress("barMonthAssigned",monthAssigned,Math.max(assignedCount,1));
+
   updateQueueMenuCounts();
 }
 function safeSource(s){return String(s).replace(/"/g,"&quot;")}
@@ -780,7 +1166,7 @@ function renderQueue(){
 
   if(document.getElementById("queueResultSummary")){
     const label=queueStatusFilter.options[queueStatusFilter.selectedIndex]?.textContent||"Queue";
-    queueResultSummary.textContent=`${label}: ${rows.length} project`;
+    queueResultSummary.textContent=`${label}: ${rows.length} project • Domain thật: ${rows.filter(x=>String(x.domain_url||"").trim()).length} • Đã báo domain: ${rows.filter(x=>x.domain_notified).length}`;
   }
 
   queueBody.innerHTML=rows.map(r=>{
