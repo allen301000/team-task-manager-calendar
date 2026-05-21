@@ -2076,12 +2076,13 @@ async function addQueueRowToCurrent(sourceId){
   const {error}=await supabaseClient
     .from("task_queue")
     .update({
+      // Add lại vào tab Tiệm mới đủ info để báo domain, nhưng KHÔNG xóa người/ngày đã assign.
       queue_status:"NEW",
       is_current:true,
       force_current:true,
       manual_added_at:nowIso,
-      assigned_person:null,
-      assigned_date:null,
+      domain_notified:false,
+      domain_notified_at:null,
       priority:row.priority||"Normal",
       updated_at:nowIso
     })
@@ -2492,75 +2493,84 @@ async function getBulkAssignPlan(count){
     .from("tasks")
     .select("task_date,person")
     .in("person",orderedNames)
+    .gte("task_date",today)
     .order("task_date",{ascending:false})
-    .limit(3000);
+    .limit(5000);
 
   if(error){
     console.warn("getBulkAssignPlan error",error);
   }
 
-  const tasks=(data||[]).filter(t=>t.task_date&&orderedNames.includes(t.person));
-
-  let latestDate=today;
-
-  if(tasks.length){
-    latestDate=tasks
-      .map(t=>t.task_date)
-      .sort()
-      .pop();
-
-    if(latestDate<today)latestDate=today;
-  }
-
   const assignedByDate={};
 
-  tasks.forEach(t=>{
-    const d=t.task_date;
+  (data||[]).forEach(t=>{
+    if(!t.task_date||!orderedNames.includes(t.person))return;
+
+    const d=String(t.task_date).slice(0,10);
 
     if(d<today)return;
 
-    if(!assignedByDate[d]){
-      assignedByDate[d]=new Set();
-    }
+    if(!assignedByDate[d])assignedByDate[d]=new Set();
 
     assignedByDate[d].add(t.person);
   });
 
+  const dates=Object.keys(assignedByDate).sort();
+  let cursorDate=dates.length?dates[dates.length-1]:today;
+
+  if(cursorDate<today)cursorDate=today;
+
   const result=[];
-  let cursorDate=latestDate;
 
   while(result.length<count){
-    if(!assignedByDate[cursorDate]){
-      assignedByDate[cursorDate]=new Set();
+    if(!assignedByDate[cursorDate])assignedByDate[cursorDate]=new Set();
+
+    const assignedSet=assignedByDate[cursorDate];
+    let maxAssignedIndex=-1;
+
+    assignedSet.forEach(person=>{
+      const idx=orderedNames.indexOf(person);
+      if(idx>maxAssignedIndex)maxAssignedIndex=idx;
+    });
+
+    // Rule: chạy đúng thứ tự sort_order của team.
+    // Nếu ngày đang chạy đã có Tony thì bắt đầu Alex; có tới Leo thì qua ngày mới về Tony.
+    let startIndex=maxAssignedIndex+1;
+
+    if(startIndex>=orderedNames.length){
+      const nextDate=new Date(cursorDate+"T00:00:00");
+      nextDate.setDate(nextDate.getDate()+1);
+      cursorDate=nextDate.toISOString().slice(0,10);
+      continue;
     }
 
-    let addedInThisDate=false;
-
-    for(const person of orderedNames){
+    for(let i=startIndex;i<orderedNames.length;i++){
       if(result.length>=count)break;
 
-      if(!assignedByDate[cursorDate].has(person)){
-        result.push({
-          date:cursorDate,
-          person
-        });
+      const person=orderedNames[i];
 
-        assignedByDate[cursorDate].add(person);
-        addedInThisDate=true;
-      }
+      if(assignedSet.has(person))continue;
+
+      result.push({
+        date:cursorDate,
+        person
+      });
+
+      assignedSet.add(person);
     }
 
     if(result.length>=count)break;
 
-    // Nếu ngày hiện tại đã đủ team hoặc không còn slot trống, chuyển sang ngày tiếp theo.
     const nextDate=new Date(cursorDate+"T00:00:00");
     nextDate.setDate(nextDate.getDate()+1);
     cursorDate=nextDate.toISOString().slice(0,10);
-
-    if(!addedInThisDate&&assignedByDate[cursorDate]){
-      continue;
-    }
   }
+
+  console.table(result.map((x,idx)=>({
+    no:idx+1,
+    date:x.date,
+    person:x.person
+  })));
 
   return result;
 }
@@ -2692,11 +2702,21 @@ async function bulkAssignSelected(){
 
   let selectedRows=queueRows.filter(r=>selectedIds.includes(r.source_id));
 
-  selectedRows=selectedRows.filter(r=>(r.queue_status||"NEW")==="NEW");
+  const skippedAlreadyAssigned=selectedRows.filter(r=>String(r.assigned_person||"").trim()).length;
+
+  selectedRows=selectedRows.filter(r=>{
+    const status=r.queue_status||"NEW";
+    const alreadyAssigned=String(r.assigned_person||"").trim();
+    return status==="NEW"&&!alreadyAssigned;
+  });
 
   if(!selectedRows.length){
-    toast("Các project đã chọn không còn trạng thái NEW", "#8a6d00");
+    toast("Các project đã chọn đã assign rồi hoặc không còn trạng thái NEW", "#8a6d00");
     return;
+  }
+
+  if(skippedAlreadyAssigned){
+    logDebug(`Assign batch bỏ qua ${skippedAlreadyAssigned} project đã có assignee để tránh assign lại.`);
   }
 
   selectedRows=sortQueuePriorityThenSheet
@@ -2705,7 +2725,9 @@ async function bulkAssignSelected(){
 
   const ok=confirm(
     `Assign batch ${selectedRows.length} project?\n\n`+
-    `Hệ thống sẽ tự chia theo thứ tự team và tự qua ngày tiếp theo khi đủ người.`
+    `Rule hiện tại: theo Sort ID team Web, ví dụ Tony → Alex → Lucas → Allen → Hayden → Leo. `+
+    `Khi ngày hiện tại đủ người thì tự chuyển sang ngày tiếp theo và quay lại người đầu tiên.`+
+    (skippedAlreadyAssigned?`\n\nĐã bỏ qua ${skippedAlreadyAssigned} project đã có assignee để không assign trùng.`:"")
   );
 
   if(!ok)return;
