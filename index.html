@@ -1963,7 +1963,14 @@ async function notifyManualDomain(){
     return String(r.domain_url||"").trim()||"sub";
   });
 
-  const message=`${mention}\\n\\n${projectLines.join("\\n")}\\n----------------------------------------\\n${domainLines.join("\\n")}`;
+  const message=(mention?`${mention}
+
+`:"")+
+    `${projectLines.join("
+")}
+----------------------------------------
+${domainLines.join("
+")}`;
 
   await sendTelegram({
     event:"domain_manual",
