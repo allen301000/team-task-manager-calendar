@@ -958,6 +958,7 @@ const FALLBACK_MEMBERS=[
 let settings={...DEFAULTS,...JSON.parse(localStorage.getItem("tm_settings")||"{}")};
 let supabaseClient=null,current=new Date(),cache={},queueRows=[],members=[],auditLogs=[];
 let selectedQueue=null,selectedDay=null,editingTask=null,editingMember=null,dragTask=null,dragFromDay=null,dragFromIndex=null,contextQueueSourceId=null;
+let queueRenderToken=0;
 let canEdit=localStorage.getItem("tm_canEdit")==="1";
 
 function esc(s){return String(s??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]))}
@@ -1332,6 +1333,36 @@ function sortBySheetOrder(rows){
 }
 
 function safeSource(s){return String(s).replace(/"/g,"&quot;")}
+function queueRowHtml(r){
+  const st=r.queue_status||"NEW";
+  const pn=r.package_name||pkgFromProject(r.project||r.source_id);
+  const domain=String(r.domain_url||"").trim();
+  const rowCls=st==="ASSIGNED"?"queue-row-assigned":st==="PENDING_INFO"?"queue-row-pending":st==="SKIPPED"?"queue-row-skipped":r.is_current?"queue-row-current":"";
+  const assignedMonth=String(r.assigned_month||r.assigned_date||"").slice(0,7);
+
+  return `<tr class="${rowCls}" oncontextmenu="openQueueContextMenu(event,'${safeSource(r.source_id)}')">
+    <td><input type="checkbox" class="queue-domain-check" value="${esc(r.source_id)}"></td>
+    <td><b>${esc(r.source_id)}</b></td>
+    <td><b>${esc(r.project)}</b><div class="muted">${esc(r.note||"")}</div></td>
+    <td>${esc(r.am||"")}</td>
+    <td>${esc(r.start_date||"")}</td>
+    <td>${esc(r.expired_date||"")}</td>
+    <td>${domain?`<span class="queue-domain-real">${esc(domain)}</span>`:`<span class="queue-domain-sub">sub</span>`}</td>
+    <td>${r.domain_notified?`<span class="badge assigned">Đã báo</span><div class="muted">${esc(r.domain_notified_at?new Date(r.domain_notified_at).toLocaleString():"")}</div>`:`<span class="badge pending">Chưa báo</span>`}</td>
+    <td><span class="badge">${esc(pn)}</span></td>
+    <td>${r.template_url?`<a href="${esc(r.template_url)}" target="_blank">Open</a>`:""}</td>
+    <td>${r.layout_url?`<a href="${esc(r.layout_url)}" target="_blank">Open</a>`:""}</td>
+    <td><span class="badge ${st==="ASSIGNED"?"assigned":st==="PENDING_INFO"?"pending":st==="SKIPPED"?"urgent":"new"}">${esc(st)}</span></td>
+    <td>${esc(assignedMonth||"")}</td>
+    <td>${r.queue_status==="ASSIGNED"||r.assigned_person?`<b>${esc(r.assigned_person||"")}</b><div class="muted">${esc(r.assigned_date||"")}</div>`:`<span class="muted">-</span>`}</td>
+    <td>
+      <button class="primary" onclick='openAssign("${safeSource(r.source_id)}")'>Assign</button>
+      <button class="ghost" onclick='skipQueue("${safeSource(r.source_id)}")'>Skip</button>
+      ${st==="ASSIGNED"?`<button class="warn" onclick='unassignQueue("${safeSource(r.source_id)}")'>Unassign</button>`:""}
+    </td>
+  </tr>`;
+}
+
 function renderQueue(){
   const st=queueStatusFilter.value;
   if(document.getElementById("queueCurrentFilterChip"))queueCurrentFilterChip.textContent=queueFilterLabel(st);
@@ -1377,40 +1408,35 @@ function renderQueue(){
     queueResultSummary.textContent=`${label}: ${rows.length} project • Domain thật: ${rows.filter(x=>String(x.domain_url||"").trim()).length} • Đã báo domain: ${rows.filter(x=>x.domain_notified).length}`;
   }
 
-  queueBody.innerHTML=rows.map(r=>{
-    const st=r.queue_status||"NEW";
-    const pn=r.package_name||pkgFromProject(r.project||r.source_id);
-    const domain=String(r.domain_url||"").trim();
-    const rowCls=st==="ASSIGNED"?"queue-row-assigned":st==="PENDING_INFO"?"queue-row-pending":st==="SKIPPED"?"queue-row-skipped":r.is_current?"queue-row-current":"";
-    const assignedMonth=String(r.assigned_month||r.assigned_date||"").slice(0,7);
+  const token=++queueRenderToken;
+  queueBody.innerHTML="";
 
-    return `<tr class="${rowCls}" oncontextmenu="openQueueContextMenu(event,'${safeSource(r.source_id)}')">
-      <td><input type="checkbox" class="queue-domain-check" value="${esc(r.source_id)}"></td>
-      <td><b>${esc(r.source_id)}</b></td>
-      <td><b>${esc(r.project)}</b>
-        <div class="muted">${esc(r.note||"")}</div></td>
-      <td>${esc(r.am||"")}</td>
-      <td>${esc(r.start_date||"")}</td>
-      <td>${esc(r.expired_date||"")}</td>
-      <td>${domain?`<span class="queue-domain-real">${esc(domain)}</span>`:`<span class="queue-domain-sub">sub</span>`}</td>
-      <td>${r.domain_notified?`<span class="badge assigned">Đã báo</span><div class="muted">${esc(r.domain_notified_at?new Date(r.domain_notified_at).toLocaleString():"")}</div>`:`<span class="badge pending">Chưa báo</span>`}</td>
-      <td><span class="badge">${esc(pn)}</span></td>
-      <td>${r.template_url?`<a href="${esc(r.template_url)}" target="_blank">Open</a>`:""}</td>
-      <td>${r.layout_url?`<a href="${esc(r.layout_url)}" target="_blank">Open</a>`:""}</td>
-      <td><span class="badge ${st==="ASSIGNED"?"assigned":st==="PENDING_INFO"?"pending":st==="SKIPPED"?"urgent":"new"}">${esc(st)}</span></td>
-      <td>${esc(assignedMonth||"")}</td>
-      <td>${
-        r.queue_status==="ASSIGNED"||r.assigned_person
-          ? `<b>${esc(r.assigned_person||"")}</b><div class="muted">${esc(r.assigned_date||"")}</div>`
-          : `<span class="muted">-</span>`
-      }</td>
-      <td>
-        <button class="primary" onclick='openAssign("${safeSource(r.source_id)}")'>Assign</button>
-        <button class="ghost" onclick='skipQueue("${safeSource(r.source_id)}")'>Skip</button>
-        ${st==="ASSIGNED"?`<button class="warn" onclick='unassignQueue("${safeSource(r.source_id)}")'>Unassign</button>`:""}
-      </td>
-    </tr>`;
-  }).join("");
+  const chunkSize=120;
+  let index=0;
+
+  function renderChunk(){
+    if(token!==queueRenderToken)return;
+
+    const html=rows.slice(index,index+chunkSize).map(queueRowHtml).join("");
+    if(html)queueBody.insertAdjacentHTML("beforeend",html);
+
+    index+=chunkSize;
+
+    if(index<rows.length){
+      if(document.getElementById("queueResultSummary")){
+        const label=queueStatusFilter.options[queueStatusFilter.selectedIndex]?.textContent||"Queue";
+        queueResultSummary.textContent=`${label}: đang render ${Math.min(index,rows.length)}/${rows.length} project...`;
+      }
+      setTimeout(renderChunk,0);
+    }else{
+      if(document.getElementById("queueResultSummary")){
+        const label=queueStatusFilter.options[queueStatusFilter.selectedIndex]?.textContent||"Queue";
+        queueResultSummary.textContent=`${label}: ${rows.length} project • Domain thật: ${rows.filter(x=>String(x.domain_url||"").trim()).length} • Đã báo domain: ${rows.filter(x=>x.domain_notified).length}`;
+      }
+    }
+  }
+
+  renderChunk();
 
   renderQueueKpis();
   updateQueueMenuCounts();
@@ -1899,9 +1925,16 @@ function loadSheetQueueJsonp(apiUrl,action="queue"){
 }
 
 function toggleQueueCheckAll(checked){
-  document
-    .querySelectorAll(".queue-domain-check")
-    .forEach(cb=>cb.checked=checked);
+  const boxes=[...document.querySelectorAll(".queue-domain-check")];
+  let i=0;
+
+  function step(){
+    const end=Math.min(i+300,boxes.length);
+    for(;i<end;i++)boxes[i].checked=checked;
+    if(i<boxes.length)setTimeout(step,0);
+  }
+
+  step();
 }
 
 function extractProjectCode(project){
@@ -2702,21 +2735,84 @@ async function bulkAssignSelected(){
 
   let selectedRows=queueRows.filter(r=>selectedIds.includes(r.source_id));
 
-  const skippedAlreadyAssigned=selectedRows.filter(r=>String(r.assigned_person||"").trim()).length;
+  // Safety gate 1: bỏ qua tất cả project đã có dấu hiệu assign trong task_queue.
+  // Quan trọng: project đã assign nhưng được add lại vào "Tiệm mới đủ info" để báo domain
+  // vẫn phải giữ nguyên Calendar và KHÔNG được assign batch lại.
+  const skippedByQueue=selectedRows.filter(r=>{
+    const status=String(r.queue_status||"NEW").trim();
+    const person=String(r.assigned_person||"").trim();
+    const date=String(r.assigned_date||"").trim();
+    const month=String(r.assigned_month||"").trim();
+    return status==="ASSIGNED"||!!person||!!date||!!month;
+  });
 
   selectedRows=selectedRows.filter(r=>{
-    const status=r.queue_status||"NEW";
-    const alreadyAssigned=String(r.assigned_person||"").trim();
-    return status==="NEW"&&!alreadyAssigned;
+    const status=String(r.queue_status||"NEW").trim();
+    const person=String(r.assigned_person||"").trim();
+    const date=String(r.assigned_date||"").trim();
+    const month=String(r.assigned_month||"").trim();
+    return status==="NEW"&&!person&&!date&&!month;
   });
 
   if(!selectedRows.length){
     toast("Các project đã chọn đã assign rồi hoặc không còn trạng thái NEW", "#8a6d00");
+    if(skippedByQueue.length){
+      logDebug("Assign batch bỏ qua project đã assign trong task_queue", skippedByQueue.map(r=>({
+        source_id:r.source_id,
+        project:r.project,
+        queue_status:r.queue_status,
+        assigned_person:r.assigned_person,
+        assigned_date:r.assigned_date,
+        assigned_month:r.assigned_month
+      })));
+    }
     return;
   }
 
+  // Safety gate 2: check trực tiếp bảng tasks/Calendar.
+  // Nếu Calendar đã có task theo source_id thì bỏ qua, dù task_queue đang bị mất assigned_person.
+  let existingTaskSourceIds=new Set();
+
+  try{
+    for(const chunk of chunkList(selectedRows.map(r=>r.source_id),100)){
+      const {data,error}=await supabaseClient
+        .from("tasks")
+        .select("source_id,person,task_date")
+        .in("source_id",chunk);
+
+      if(error)throw error;
+
+      (data||[]).forEach(t=>{
+        if(t.source_id)existingTaskSourceIds.add(t.source_id);
+      });
+
+      await sleep(0);
+    }
+  }catch(checkTaskErr){
+    console.error("Assign batch calendar safety check failed",checkTaskErr);
+    toast("Không check được Calendar, đã dừng để tránh ảnh hưởng task đã assign: "+(checkTaskErr.message||checkTaskErr), "#b71c1c");
+    return;
+  }
+
+  const skippedByCalendar=selectedRows.filter(r=>existingTaskSourceIds.has(r.source_id));
+  selectedRows=selectedRows.filter(r=>!existingTaskSourceIds.has(r.source_id));
+
+  if(!selectedRows.length){
+    toast("Các project đã chọn đã có task trong Calendar nên không assign lại", "#8a6d00");
+    logDebug("Assign batch bỏ qua project đã có task trong Calendar", skippedByCalendar.map(r=>({
+      source_id:r.source_id,
+      project:r.project
+    })));
+    return;
+  }
+
+  const skippedAlreadyAssigned=skippedByQueue.length+skippedByCalendar.length;
+
   if(skippedAlreadyAssigned){
-    logDebug(`Assign batch bỏ qua ${skippedAlreadyAssigned} project đã có assignee để tránh assign lại.`);
+    logDebug(`Assign batch bỏ qua ${skippedAlreadyAssigned} project đã assign / đã có Calendar task để tránh assign lại.`, {
+      skippedByQueue:skippedByQueue.map(r=>({source_id:r.source_id,project:r.project,assigned_person:r.assigned_person,assigned_date:r.assigned_date,queue_status:r.queue_status})),
+      skippedByCalendar:skippedByCalendar.map(r=>({source_id:r.source_id,project:r.project}))
+    });
   }
 
   selectedRows=sortQueuePriorityThenSheet
@@ -2807,7 +2903,7 @@ async function bulkAssignSelected(){
 
     toast("Đang xóa task cũ nếu có...", "#f05a28");
 
-    for(const chunk of chunkList(sourceIds,300)){
+    for(const chunk of chunkList(sourceIds,100)){
       const {error}=await supabaseClient
         .from("tasks")
         .delete()
@@ -2822,7 +2918,7 @@ async function bulkAssignSelected(){
 
     const insertedMap={};
 
-    for(const chunk of chunkList(prepared.map(x=>x.taskPayload),300)){
+    for(const chunk of chunkList(prepared.map(x=>x.taskPayload),100)){
       const {data,error}=await supabaseClient
         .from("tasks")
         .insert(chunk)
@@ -2839,7 +2935,7 @@ async function bulkAssignSelected(){
 
     toast("Đang cập nhật Queue assigned...", "#f05a28");
 
-    for(const chunk of chunkList(prepared.map(x=>x.queuePayload),300)){
+    for(const chunk of chunkList(prepared.map(x=>x.queuePayload),100)){
       const {error}=await supabaseClient
         .from("task_queue")
         .upsert(chunk,{onConflict:"source_id",ignoreDuplicates:false});
@@ -2864,7 +2960,7 @@ async function bulkAssignSelected(){
       .then(()=>console.log("Bulk Telegram/log done"))
       .catch(e=>console.error("Bulk Telegram/log error",e));
 
-    await Promise.all([loadQueue(),render()]);
+    await loadQueue();
 
     const sec=Math.round((Date.now()-startedAt)/1000);
     toast(`Assign batch xong ${prepared.length} task trong ${sec}s`, "#2e7d32");
