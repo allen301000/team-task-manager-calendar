@@ -377,7 +377,8 @@ function pkgFromProject(project){
 }
 
 function pkgFromId(id){
-  return pkgFromProject(id);}[c]||"Gói Custom"}
+  return pkgFromProject(id);
+}
 function pointFor(pkg,pri="Normal"){let p=PACKAGE_POINTS[pkg]||1;if(pri==="Urgent")p+=.5;if(pri==="High")p+=.25;return p}
 function requireDb(){if(!supabaseClient){toast("Chưa cấu hình Supabase trong Setup","#b71c1c");return false}return true}
 function initClient(){if(settings.supabaseUrl&&settings.supabaseKey)supabaseClient=supabase.createClient(settings.supabaseUrl,settings.supabaseKey)}
