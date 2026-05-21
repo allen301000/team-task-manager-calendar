@@ -591,6 +591,77 @@
   }
 }
 
+  
+/* ===== Compact Queue UI Override ===== */
+body{font-size:13px}
+button{font-size:12px!important;padding:6px 9px!important;border-radius:9px!important}
+input,select,textarea{font-size:12px!important;padding:7px 9px!important;border-radius:9px!important}
+main{padding:14px!important}
+aside{padding:14px!important}
+.top{padding:12px 14px!important;border-radius:14px!important;margin-bottom:12px!important}
+.top h2{font-size:18px!important}
+.sub{font-size:11px!important}
+.card{padding:12px!important;border-radius:14px!important}
+.tools{gap:6px!important}
+table{font-size:11px!important}
+th,td{padding:7px 8px!important}
+.badge{font-size:10px!important;padding:2px 7px!important}
+.nav button{font-size:13px!important;padding:7px 9px!important}
+.nav-sub button{font-size:12px!important;padding:6px 8px!important}
+.nav-count{font-size:10px!important;min-width:22px!important;padding:1px 6px!important}
+.logo{width:44px!important;height:44px!important;border-radius:12px!important}
+.brand{gap:9px!important;margin-bottom:14px!important}
+.brand h1{font-size:16px!important}
+.brand p{font-size:10px!important}
+.side{padding:10px!important;border-radius:12px!important;margin-top:12px!important}
+.side p{font-size:11px!important}
+.queue-command-center{margin-bottom:10px!important}
+.queue-overview-header{display:none!important}
+.queue-dynamic-summary{display:none!important}
+.queue-dashboard{display:none!important}
+.queue-table-card{padding:10px!important}
+.queue-section-title{margin-bottom:8px!important}
+.queue-section-title h3{font-size:14px!important}
+.queue-section-title .muted{font-size:11px!important}
+.queue-toolbar{padding:8px!important;border-radius:12px!important;margin-bottom:10px!important;box-shadow:none!important}
+.queue-toolbar-left,.queue-toolbar-right{gap:6px!important}
+.queue-filter-chip{font-size:12px!important;padding:7px 10px!important}
+.queue-search-input{max-width:300px!important}
+.queue-month-input{max-width:150px!important}
+.wrap{border-radius:12px!important}
+.kpi-compact-row{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(180px,1fr));
+  gap:10px;
+  margin-bottom:10px;
+}
+.kpi-compact{
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:12px;
+  box-shadow:var(--shadow);
+}
+.kpi-compact .label{
+  font-size:11px;
+  color:var(--muted);
+  margin-bottom:6px;
+}
+.kpi-compact .value{
+  font-size:26px;
+  font-weight:900;
+  line-height:1;
+}
+.kpi-compact .hint{
+  font-size:11px;
+  color:var(--muted);
+  margin-top:5px;
+}
+@media(max-width:720px){
+  .kpi-compact-row{grid-template-columns:1fr}
+  main{padding:10px!important}
+}
+
   </style>
 </head>
 
@@ -640,47 +711,27 @@
       <div class="top queue-hero">
         <div><h2>📥 Task Queue</h2><div class="sub">Task mới từ Google Sheet, lọc theo rule và phân vào calendar.</div></div>
         <div class="tools">
-          <button class="primary" onclick="syncQueueFromApi()">Sync từ Sheet API</button>
-          <button onclick="loadQueue()">Reload Queue</button>
-          <button class="ghost" onclick="patchOldQueueDomainPackage()">Update domain/gói cũ</button>
-          <button class="ghost" onclick="fixAssignedQueueStatus()">Fix trạng thái assigned</button>
-          <button class="ghost" onclick="syncAssignedFromCalendarByMonth()">Sync assigned theo tháng</button>
-          <button class="primary" onclick="bulkAssignSelected()">Assign hàng loạt</button>
-          <button class="warn" onclick="notifyManualDomain()">Thông báo domain thủ công</button>
-          <button class="ghost" onclick="toast('Chức năng tạo domain tự động sẽ bổ sung sau', '#8a6d00')">Tạo domain tự động</button>
+          <button class="primary" onclick="syncQueueFromApi()">Sync Sheet</button>
+          <button onclick="loadQueue()">Reload</button>
+          <button class="ghost" onclick="patchOldQueueDomainPackage()">Update domain/gói</button>
+          <button class="ghost" onclick="fixAssignedQueueStatus()">Fix assigned</button>
+          <button class="ghost" onclick="syncAssignedFromCalendarByMonth()">Sync tháng</button>
+          <button class="primary" onclick="bulkAssignSelected()">Assign batch</button>
+          <button class="warn" onclick="notifyManualDomain()">Báo domain</button>
+          <button class="ghost" onclick="toast('Chức năng tạo domain tự động sẽ bổ sung sau', '#8a6d00')">Auto domain</button>
         </div>
       </div>
 
-      <div class="queue-command-center">
-        <div class="queue-overview-header">
-          <div class="queue-overview-title">
-            <h3 id="queueDynamicTitle">Task Queue</h3>
-            <p id="queueDynamicSubtitle">Theo dõi trạng thái công việc theo từng nhóm.</p>
-          </div>
-          <div class="queue-overview-actions">
-            <span class="queue-live-chip"><span class="queue-live-dot"></span> Live tracking</span>
-            <span class="queue-filter-chip" id="queueCurrentFilterChip">📥 Tiệm mới đủ info</span>
-          </div>
+      <div class="kpi-compact-row">
+        <div class="kpi-compact">
+          <div class="label">Tiệm mới đủ info</div>
+          <div class="value" id="kpiCurrent">0</div>
+          <div class="hint">Đang chờ xử lý / báo domain / assign</div>
         </div>
-
-        <div class="queue-dynamic-summary">
-          <div class="queue-summary-panel">
-            <h3 id="queueFocusTitle">📥 Tiệm mới đủ info</h3>
-            <p id="queueFocusText">Các project đang đủ điều kiện để team xử lý tiếp.</p>
-            <div class="queue-summary-grid">
-              <div class="queue-summary-item"><b id="focusTotal">0</b><span>Tổng trong tab</span></div>
-              <div class="queue-summary-item"><b id="focusDomainRate">0%</b><span>Tỉ lệ có domain</span></div>
-              <div class="queue-summary-item"><b id="focusAssignRate">0%</b><span>Tỉ lệ đã assign</span></div>
-            </div>
-          </div>
-
-          <div class="queue-health-panel">
-            <h3>Queue Health</h3>
-            <div class="queue-health-row"><span>Domain chưa báo</span><strong id="healthDomainPending">0</strong></div>
-            <div class="queue-health-row"><span>Domain đã báo</span><strong id="healthDomainDone">0</strong></div>
-            <div class="queue-health-row"><span>Assign tháng đang chọn</span><strong id="healthMonthAssigned">0</strong></div>
-            <div class="queue-health-row"><span>Task cần xử lý</span><strong id="healthActionNeeded">0</strong></div>
-          </div>
+        <div class="kpi-compact">
+          <div class="label">Đã assign trong tháng</div>
+          <div class="value" id="kpiMonthAssigned">0</div>
+          <div class="hint">Theo tháng đang chọn</div>
         </div>
       </div>
 
@@ -1119,11 +1170,16 @@ async function loadQueue(){
   }
 }
 function renderQueueFilters(){const cur=queuePackageFilter.value;const ps=[...new Set(queueRows.map(r=>r.package_name||pkgFromId(r.source_id)).filter(Boolean))].sort();queuePackageFilter.innerHTML='<option value="">Tất cả gói</option>'+ps.map(p=>`<option>${esc(p)}</option>`).join("");queuePackageFilter.value=cur}
-function setProgress(id,value,max){
-  const el=document.querySelector(`#${id} span`);
-  if(!el)return;
-  const pct=max>0?Math.min(100,Math.round((value/max)*100)):0;
-  el.style.width=pct+"%";
+function getQueueRowsByFilter(filterValue){
+  let rows=[...queueRows];
+
+  if(filterValue==="CURRENT"){
+    rows=rows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW");
+  }else if(filterValue&&filterValue!=="ALL"){
+    rows=rows.filter(r=>(r.queue_status||"NEW")===filterValue);
+  }
+
+  return rows;
 }
 
 function getQueueRowsByFilter(filterValue){
@@ -1140,80 +1196,17 @@ function getQueueRowsByFilter(filterValue){
 
 function renderQueueKpis(){
   const month=document.getElementById("queueAssignMonthFilter")?.value||`${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,"0")}`;
-  const activeFilter=document.getElementById("queueStatusFilter")?.value||"CURRENT";
 
-  const allCount=queueRows.length||0;
-  const currentRows=getQueueRowsByFilter("CURRENT");
-  const newRows=getQueueRowsByFilter("NEW");
-  const assignedRows=getQueueRowsByFilter("ASSIGNED");
-  const pendingRows=getQueueRowsByFilter("PENDING_INFO");
-  const skippedRows=getQueueRowsByFilter("SKIPPED");
+  const currentCount=queueRows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW").length;
 
-  const currentCount=currentRows.length;
-  const newCount=newRows.length;
-  const assignedCount=assignedRows.length;
-  const pendingCount=pendingRows.length;
-  const skippedCount=skippedRows.length;
-
-  const monthAssignedRows=assignedRows.filter(r=>{
+  const monthAssigned=queueRows.filter(r=>{
     const m=String(r.assigned_month||r.assigned_date||"").slice(0,7);
-    return m===month;
-  });
-  const monthAssigned=monthAssignedRows.length;
-
-  const focusRows=getQueueRowsByFilter(activeFilter);
-  const focusTotal=focusRows.length;
-  const focusWithDomain=focusRows.filter(r=>String(r.domain_url||"").trim()).length;
-  const focusAssigned=focusRows.filter(r=>r.queue_status==="ASSIGNED").length;
-  const focusDomainRate=focusTotal?Math.round((focusWithDomain/focusTotal)*100):0;
-  const focusAssignRate=focusTotal?Math.round((focusAssigned/focusTotal)*100):0;
-
-  const domainPending=queueRows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW"&&!r.domain_notified).length;
-  const domainDone=queueRows.filter(r=>r.domain_notified).length;
-  const actionNeeded=currentCount+pendingCount;
+    return m===month&&r.queue_status==="ASSIGNED";
+  }).length;
 
   if(document.getElementById("kpiCurrent"))kpiCurrent.textContent=currentCount;
-  if(document.getElementById("kpiNew"))kpiNew.textContent=newCount;
-  if(document.getElementById("kpiAssigned"))kpiAssigned.textContent=assignedCount;
-  if(document.getElementById("kpiPending"))kpiPending.textContent=pendingCount;
-  if(document.getElementById("kpiSkipped"))kpiSkipped.textContent=skippedCount;
   if(document.getElementById("kpiMonthAssigned"))kpiMonthAssigned.textContent=monthAssigned;
-  if(document.getElementById("kpiMonthLabel"))kpiMonthLabel.textContent=month;
   if(document.getElementById("kpiToday"))kpiToday.textContent=Object.values(cache).flat().filter(t=>t.task_date===todayStr()).length;
-
-  if(document.getElementById("focusTotal"))focusTotal.textContent=focusTotal;
-  if(document.getElementById("focusDomainRate"))focusDomainRate.textContent=focusDomainRate+"%";
-  if(document.getElementById("focusAssignRate"))focusAssignRate.textContent=focusAssignRate+"%";
-  if(document.getElementById("healthDomainPending"))healthDomainPending.textContent=domainPending;
-  if(document.getElementById("healthDomainDone"))healthDomainDone.textContent=domainDone;
-  if(document.getElementById("healthMonthAssigned"))healthMonthAssigned.textContent=monthAssigned;
-  if(document.getElementById("healthActionNeeded"))healthActionNeeded.textContent=actionNeeded;
-
-  const label=queueFilterLabel(activeFilter);
-  const descriptions={
-    CURRENT:"Các project đủ điều kiện đang chờ team xử lý, báo domain hoặc assign.",
-    NEW:"Các project chưa được assign vào calendar.",
-    ASSIGNED:"Các project đã được phân người và ngày làm.",
-    PENDING_INFO:"Các project đang thiếu thông tin cần AM/Sale bổ sung.",
-    SKIPPED:"Các project đã tạm bỏ qua hoặc chưa xử lý.",
-    ALL:"Toàn bộ dữ liệu task queue trong hệ thống."
-  };
-
-  if(document.getElementById("queueDynamicTitle"))queueDynamicTitle.textContent=label;
-  if(document.getElementById("queueDynamicSubtitle"))queueDynamicSubtitle.textContent=`Đang xem ${focusTotal} project trong tab này.`;
-  if(document.getElementById("queueFocusTitle"))queueFocusTitle.textContent=label;
-  if(document.getElementById("queueFocusText"))queueFocusText.textContent=descriptions[activeFilter]||descriptions.CURRENT;
-
-  document.querySelectorAll(".queue-stat-card[data-stat-filter]").forEach(card=>{
-    card.classList.toggle("active-metric",card.dataset.statFilter===activeFilter);
-  });
-
-  setProgress("barCurrent",currentCount,Math.max(allCount,1));
-  setProgress("barNew",newCount,Math.max(allCount,1));
-  setProgress("barAssigned",assignedCount,Math.max(allCount,1));
-  setProgress("barPending",pendingCount,Math.max(allCount,1));
-  setProgress("barSkipped",skippedCount,Math.max(allCount,1));
-  setProgress("barMonthAssigned",monthAssigned,Math.max(assignedCount,1));
 
   updateQueueMenuCounts();
 }
@@ -1622,7 +1615,7 @@ async function patchOldQueueDomainPackage(){
   }
 }
 
-async function syncQueueFromApi(){clearDebug();console.group("[Task Queue] Sync từ Sheet API");logDebug("[Task Queue] Sync từ Sheet API");if(!requireDb()){console.groupEnd();return}if(!settings.sheetApi){toast("Chưa nhập Apps Script API URL","#b71c1c");console.groupEnd();return}try{toast("Đang sync từ Sheet...","#f05a28");const json=await loadSheetQueueJsonp(settings.sheetApi);logDebug("Raw API response",json);if(!json)throw new Error("Apps Script API không trả dữ liệu");if(json.success===false)throw new Error(json.error||"Apps Script API success=false");const rows=Array.isArray(json)?json:(json.data||[]);console.log("DOMAIN CHECK FROM GAS:",rows.map(r=>({project:r.project,domain:r.domain,Domain:r.Domain,domain_url:r.domain_url})));const nowIso=new Date().toISOString();await supabaseClient.from("task_queue").update({is_current:false}).neq("source_id","__never__");let payload=rows.map((r,idx)=>{const project=String(r.project||r.Project||r.Projects||"").trim();let sourceId=normalizeProjectId(project||r.source_id||"");if(!sourceId)sourceId="ROW-"+String(r.row_number||idx+1);return{source_id:sourceId,project,am:String(r.am||r.AM||"").trim(),start_date:toDateInput(r.start||r.Start||r.start_date),expired_date:toDateInput(r.expired||r.Expired||r.expired_date),template_url:String(r.template||r.template_url||r["Template màu"]||"").trim(),layout_url:String(r.layout||r.layout_url||r["Layout web"]||"").trim(),domain_url:String(r.domain||r.Domain||r.domain_url||r["Domain"]||r["Link web live"]||"").trim(),package_name:r.package_name||pkgFromProject(project),source_status:r.status||r.Status||"Doing",queue_status:"NEW",source_row:r.row_number?String(r.row_number):null,note:r.note||null,is_current:true,last_seen_at:nowIso,updated_at:nowIso}}).filter(r=>r.source_id&&r.project);const seen=new Set();payload=payload.filter(x=>{if(seen.has(x.source_id)){logDebug("Duplicate source_id skipped",x.source_id);return false}seen.add(x.source_id);return true});logDebug("Payload", {total:payload.length, firstFive:payload.slice(0,5)});if(!payload.length){toast("API không có task hợp lệ","#8a6d00");return}const totalUpserted=await upsertTaskQueueInChunks(payload,500);
+async function syncQueueFromApi(){clearDebug();console.group("[Task Queue] Sync Sheet");logDebug("[Task Queue] Sync Sheet");if(!requireDb()){console.groupEnd();return}if(!settings.sheetApi){toast("Chưa nhập Apps Script API URL","#b71c1c");console.groupEnd();return}try{toast("Đang sync từ Sheet...","#f05a28");const json=await loadSheetQueueJsonp(settings.sheetApi);logDebug("Raw API response",json);if(!json)throw new Error("Apps Script API không trả dữ liệu");if(json.success===false)throw new Error(json.error||"Apps Script API success=false");const rows=Array.isArray(json)?json:(json.data||[]);console.log("DOMAIN CHECK FROM GAS:",rows.map(r=>({project:r.project,domain:r.domain,Domain:r.Domain,domain_url:r.domain_url})));const nowIso=new Date().toISOString();await supabaseClient.from("task_queue").update({is_current:false}).neq("source_id","__never__");let payload=rows.map((r,idx)=>{const project=String(r.project||r.Project||r.Projects||"").trim();let sourceId=normalizeProjectId(project||r.source_id||"");if(!sourceId)sourceId="ROW-"+String(r.row_number||idx+1);return{source_id:sourceId,project,am:String(r.am||r.AM||"").trim(),start_date:toDateInput(r.start||r.Start||r.start_date),expired_date:toDateInput(r.expired||r.Expired||r.expired_date),template_url:String(r.template||r.template_url||r["Template màu"]||"").trim(),layout_url:String(r.layout||r.layout_url||r["Layout web"]||"").trim(),domain_url:String(r.domain||r.Domain||r.domain_url||r["Domain"]||r["Link web live"]||"").trim(),package_name:r.package_name||pkgFromProject(project),source_status:r.status||r.Status||"Doing",queue_status:"NEW",source_row:r.row_number?String(r.row_number):null,note:r.note||null,is_current:true,last_seen_at:nowIso,updated_at:nowIso}}).filter(r=>r.source_id&&r.project);const seen=new Set();payload=payload.filter(x=>{if(seen.has(x.source_id)){logDebug("Duplicate source_id skipped",x.source_id);return false}seen.add(x.source_id);return true});logDebug("Payload", {total:payload.length, firstFive:payload.slice(0,5)});if(!payload.length){toast("API không có task hợp lệ","#8a6d00");return}const totalUpserted=await upsertTaskQueueInChunks(payload,500);
 logDebug("Supabase upsert result",{count:totalUpserted,error:null});
 queueStatusFilter.value="CURRENT";
 toast(`Đã sync ${payload.length} task vào queue`,"#2e7d32");
@@ -2230,7 +2223,7 @@ async function bulkAssignSelected(){
   }
 
   const ok=confirm(
-    `Assign hàng loạt ${selectedRows.length} project?
+    `Assign batch ${selectedRows.length} project?
 
 `+
     `Hệ thống sẽ tự chọn Date + Person theo Sort ID team như logic assign hiện tại.`
