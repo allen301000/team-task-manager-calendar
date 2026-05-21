@@ -1506,40 +1506,30 @@ function renderQueue(){
 
   rows=sortQueuePriorityThenSheet(rows);
 
+  // Chống treo Chrome: chỉ render số dòng cần nhìn thấy.
+  // Nếu cần tìm project cụ thể, dùng ô Search thay vì render toàn bộ vài nghìn dòng.
+  const MAX_RENDER_ROWS=300;
+  const visibleRows=rows.slice(0,MAX_RENDER_ROWS);
+
   if(document.getElementById("queueResultSummary")){
     const label=queueStatusFilter.options[queueStatusFilter.selectedIndex]?.textContent||"Queue";
-    queueResultSummary.textContent=`${label}: ${rows.length} project • Domain thật: ${rows.filter(x=>String(x.domain_url||"").trim()).length} • Đã báo domain: ${rows.filter(x=>x.domain_notified).length}`;
+    const more=rows.length>visibleRows.length?` • Đang hiển thị ${visibleRows.length}/${rows.length}, dùng Search để lọc thêm`:"";
+    queueResultSummary.textContent=`${label}: ${rows.length} project${more} • Domain thật: ${rows.filter(x=>String(x.domain_url||"").trim()).length} • Đã báo domain: ${rows.filter(x=>x.domain_notified).length}`;
   }
 
   const token=++queueRenderToken;
   queueBody.innerHTML="";
 
-  const chunkSize=120;
-  let index=0;
+  const fragment=document.createDocumentFragment();
+  visibleRows.forEach(r=>{
+    const tpl=document.createElement("template");
+    tpl.innerHTML=queueRowHtml(r).trim();
+    if(tpl.content.firstElementChild)fragment.appendChild(tpl.content.firstElementChild);
+  });
 
-  function renderChunk(){
-    if(token!==queueRenderToken)return;
-
-    const html=rows.slice(index,index+chunkSize).map(queueRowHtml).join("");
-    if(html)queueBody.insertAdjacentHTML("beforeend",html);
-
-    index+=chunkSize;
-
-    if(index<rows.length){
-      if(document.getElementById("queueResultSummary")){
-        const label=queueStatusFilter.options[queueStatusFilter.selectedIndex]?.textContent||"Queue";
-        queueResultSummary.textContent=`${label}: đang render ${Math.min(index,rows.length)}/${rows.length} project...`;
-      }
-      setTimeout(renderChunk,0);
-    }else{
-      if(document.getElementById("queueResultSummary")){
-        const label=queueStatusFilter.options[queueStatusFilter.selectedIndex]?.textContent||"Queue";
-        queueResultSummary.textContent=`${label}: ${rows.length} project • Domain thật: ${rows.filter(x=>String(x.domain_url||"").trim()).length} • Đã báo domain: ${rows.filter(x=>x.domain_notified).length}`;
-      }
-    }
+  if(token===queueRenderToken){
+    queueBody.appendChild(fragment);
   }
-
-  renderChunk();
 
   renderQueueKpis();
   updateQueueMenuCounts();
@@ -1985,15 +1975,11 @@ function loadSheetQueueJsonp(apiUrl,action="queue"){
 
 function toggleQueueCheckAll(checked){
   const boxes=[...document.querySelectorAll(".queue-domain-check")];
-  let i=0;
-
-  function step(){
-    const end=Math.min(i+300,boxes.length);
-    for(;i<end;i++)boxes[i].checked=checked;
-    if(i<boxes.length)setTimeout(step,0);
+  // Chỉ tick các dòng đang hiển thị để tránh freeze. Muốn tick project cụ thể thì dùng Search trước.
+  boxes.forEach(cb=>{cb.checked=checked;});
+  if(boxes.length>=300){
+    toast(`Đã ${checked?"chọn":"bỏ chọn"} ${boxes.length} dòng đang hiển thị. Dùng Search để lọc thêm nếu cần.`, "#8a6d00");
   }
-
-  step();
 }
 
 function extractProjectCode(project){
@@ -2475,6 +2461,12 @@ function sleep(ms=0){
   return new Promise(resolve=>setTimeout(resolve,ms));
 }
 
+function yieldUi(){
+  return new Promise(resolve=>{
+    requestAnimationFrame(()=>setTimeout(resolve,0));
+  });
+}
+
 
 function dedupeQueueRowsBySourceId(rows){
   const map=new Map();
@@ -2781,6 +2773,92 @@ async function assignQueueRowAuto(row,forcedSlot=null){
   return {sourceId,project:text,person,taskDate,type,am};
 }
 
+
+async function selectCalendarTasksForQueueRows(rows){
+  if(!requireDb())return [];
+
+  const ids=[...new Set((rows||[]).map(r=>String(r.source_id||"").trim()).filter(Boolean))];
+  const names=[...new Set((rows||[]).map(r=>String(r.project||"").trim()).filter(Boolean))];
+  const found=[];
+  const seen=new Set();
+
+  function addRows(data){
+    (data||[]).forEach(t=>{
+      const key=String(t.id||"")+"|"+String(t.source_id||"")+"|"+String(t.text||"")+"|"+String(t.task_date||"");
+      if(!seen.has(key)){
+        seen.add(key);
+        found.push(t);
+      }
+    });
+  }
+
+  for(const chunk of chunkList(ids,25)){
+    const {data,error}=await supabaseClient
+      .from("tasks")
+      .select("id,source_id,text,person,am,task_date,type,priority,package_name,note")
+      .in("source_id",chunk);
+    if(error)throw error;
+    addRows(data);
+    await yieldUi();
+  }
+
+  // Check thêm theo đúng tên project để bắt case task cũ bị lệch source_id.
+  for(const chunk of chunkList(names,25)){
+    const {data,error}=await supabaseClient
+      .from("tasks")
+      .select("id,source_id,text,person,am,task_date,type,priority,package_name,note")
+      .in("text",chunk);
+    if(error)throw error;
+    addRows(data);
+    await yieldUi();
+  }
+
+  return found;
+}
+
+async function restoreQueueAssigneeFromTasks(skipItems){
+  if(!skipItems||!skipItems.length)return 0;
+
+  const nowIso=new Date().toISOString();
+  const payload=skipItems
+    .filter(x=>x&&x.row&&x.task&&x.task.person)
+    .map(x=>({
+      source_id:x.row.source_id,
+      project:x.row.project||x.task.text,
+      am:x.row.am||x.task.am||null,
+      start_date:x.row.start_date||null,
+      expired_date:x.row.expired_date||null,
+      template_url:x.row.template_url||null,
+      layout_url:x.row.layout_url||null,
+      domain_url:x.row.domain_url||null,
+      package_name:x.row.package_name||x.task.package_name||pkgFromProject(x.row.project||x.task.text),
+      source_status:x.row.source_status||"Doing",
+      source_row:x.row.source_row||null,
+      queue_status:"ASSIGNED",
+      is_current:false,
+      force_current:false,
+      assigned_person:x.task.person||null,
+      assigned_date:x.task.task_date||null,
+      assigned_month:String(x.task.task_date||"").slice(0,7),
+      assigned_month_note:"Restored from Calendar safety check",
+      priority:x.row.priority||x.task.priority||"Normal",
+      note:x.row.note||x.task.note||null,
+      updated_at:nowIso,
+      last_seen_at:nowIso
+    }));
+
+  let restored=0;
+  for(const chunk of chunkList(payload,25)){
+    const {error}=await supabaseClient
+      .from("task_queue")
+      .upsert(chunk,{onConflict:"source_id",ignoreDuplicates:false});
+    if(error)throw error;
+    restored+=chunk.length;
+    await yieldUi();
+  }
+  return restored;
+}
+
 async function bulkAssignSelected(){
   if(!requireDb())return;
 
@@ -2794,46 +2872,36 @@ async function bulkAssignSelected(){
 
   let selectedRows=queueRows.filter(r=>selectedIds.includes(r.source_id));
 
-  // Safety gate 1: bỏ qua tất cả project đã có dấu hiệu assign trong task_queue.
-  // Quan trọng: project đã assign nhưng được add lại vào "Tiệm mới đủ info" để báo domain
-  // vẫn phải giữ nguyên Calendar và KHÔNG được assign batch lại.
-  const skippedByQueue=selectedRows.filter(r=>{
-    const status=String(r.queue_status||"NEW").trim();
-    const person=String(r.assigned_person||"").trim();
-    const date=String(r.assigned_date||"").trim();
-    const month=String(r.assigned_month||"").trim();
-    return status==="ASSIGNED"||!!person||!!date||!!month;
-  });
-
+  // Safety gate 1: bỏ project đã có assign trong Queue.
+  const skippedByQueue=[];
   selectedRows=selectedRows.filter(r=>{
     const status=String(r.queue_status||"NEW").trim();
     const person=String(r.assigned_person||"").trim();
     const date=String(r.assigned_date||"").trim();
     const month=String(r.assigned_month||"").trim();
-    return status==="NEW"&&!person&&!date&&!month;
+    const assigned=status==="ASSIGNED"||!!person||!!date||!!month;
+    if(assigned)skippedByQueue.push(r);
+    return !assigned && status==="NEW";
   });
 
   if(!selectedRows.length){
     toast("Các project đã chọn đã assign rồi hoặc không còn trạng thái NEW", "#8a6d00");
-    if(skippedByQueue.length){
-      logDebug("Assign batch bỏ qua project đã assign trong task_queue", skippedByQueue.map(r=>({
-        source_id:r.source_id,
-        project:r.project,
-        queue_status:r.queue_status,
-        assigned_person:r.assigned_person,
-        assigned_date:r.assigned_date,
-        assigned_month:r.assigned_month
-      })));
-    }
+    logDebug("Assign batch bỏ qua project đã assign trong Queue", skippedByQueue.map(r=>({
+      source_id:r.source_id,
+      project:r.project,
+      assigned_person:r.assigned_person,
+      assigned_date:r.assigned_date,
+      queue_status:r.queue_status
+    })));
     return;
   }
 
-  // Safety gate 2: check trực tiếp bảng tasks/Calendar bằng source_id + tên project.
-  // Trường hợp task cũ trong Calendar bị lệch source_id vẫn sẽ được phát hiện theo tên project.
+  // Safety gate 2: chỉ check Calendar cho các project đang chọn, không scan toàn bộ Calendar nữa.
+  // Cách này tránh Page Unresponsive và vẫn bảo vệ task đã assign.
   let existingCalendarTasks=[];
-
   try{
-    existingCalendarTasks=await selectAllCalendarTasks();
+    toast("Đang kiểm tra Calendar cho project đã chọn...", "#f05a28");
+    existingCalendarTasks=await selectCalendarTasksForQueueRows(selectedRows);
   }catch(checkTaskErr){
     console.error("Assign batch calendar safety check failed",checkTaskErr);
     toast("Không check được Calendar, đã dừng để tránh ảnh hưởng task đã assign: "+(checkTaskErr.message||checkTaskErr), "#b71c1c");
@@ -2845,7 +2913,6 @@ async function bulkAssignSelected(){
 
   selectedRows.forEach(row=>{
     const existing=findExistingTaskForQueueRow(row,existingCalendarTasks);
-
     if(existing){
       skippedByCalendar.push({row,task:existing});
     }else{
@@ -2853,65 +2920,38 @@ async function bulkAssignSelected(){
     }
   });
 
-  selectedRows=stillAssignable;
-
   if(skippedByCalendar.length){
-    // Tự khôi phục Assignee cho các dòng queue đang thiếu nhưng Calendar đã có task.
-    const nowIso=new Date().toISOString();
-    const restorePayload=skippedByCalendar.map(x=>({
-      source_id:x.row.source_id,
-      project:x.row.project||x.task.text,
-      queue_status:"ASSIGNED",
-      is_current:false,
-      assigned_person:x.task.person||null,
-      assigned_date:x.task.task_date||null,
-      assigned_month:String(x.task.task_date||"").slice(0,7),
-      assigned_month_note:`Restored from Calendar during assign batch safety check`,
-      updated_at:nowIso,
-      last_seen_at:nowIso
-    }));
-
     try{
-      for(const chunk of chunkList(restorePayload,100)){
-        await supabaseClient.from("task_queue").upsert(chunk,{onConflict:"source_id",ignoreDuplicates:false});
-        await sleep(0);
-      }
+      const restored=await restoreQueueAssigneeFromTasks(skippedByCalendar);
+      logDebug(`Đã restore ${restored} assignee từ Calendar trước khi assign batch`, skippedByCalendar.map(x=>({
+        source_id:x.row.source_id,
+        project:x.row.project,
+        calendar_person:x.task.person,
+        calendar_date:x.task.task_date
+      })));
     }catch(restoreErr){
       console.warn("Không restore được queue từ Calendar", restoreErr);
+      toast("Có task đã assign trong Calendar nhưng restore Queue lỗi. Đã dừng để an toàn.", "#b71c1c");
+      return;
     }
   }
 
+  selectedRows=stillAssignable;
+
   if(!selectedRows.length){
-    toast("Các project đã chọn đã có task trong Calendar nên không assign lại. Mình đã sync lại Assignee từ Calendar, reload lại danh sách.", "#8a6d00");
-    logDebug("Assign batch bỏ qua project đã có task trong Calendar", skippedByCalendar.map(x=>({
-      source_id:x.row.source_id,
-      project:x.row.project,
-      calendar_text:x.task.text,
-      calendar_person:x.task.person,
-      calendar_date:x.task.task_date
-    })));
+    toast("Các project đã chọn đã có task trong Calendar nên không assign lại. Mình đã sync lại Assignee, reload lại danh sách.", "#8a6d00");
     await loadQueue();
     return;
   }
 
+  selectedRows=sortQueuePriorityThenSheet(selectedRows);
+
   const skippedAlreadyAssigned=skippedByQueue.length+skippedByCalendar.length;
-
-  if(skippedAlreadyAssigned){
-    logDebug(`Assign batch bỏ qua ${skippedAlreadyAssigned} project đã assign / đã có Calendar task để tránh assign lại.`, {
-      skippedByQueue:skippedByQueue.map(r=>({source_id:r.source_id,project:r.project,assigned_person:r.assigned_person,assigned_date:r.assigned_date,queue_status:r.queue_status})),
-      skippedByCalendar:skippedByCalendar.map(x=>({source_id:x.row.source_id,project:x.row.project,calendar_person:x.task.person,calendar_date:x.task.task_date}))
-    });
-  }
-
-  selectedRows=sortQueuePriorityThenSheet
-    ? sortQueuePriorityThenSheet(selectedRows)
-    : sortBySheetOrder(selectedRows);
-
   const ok=confirm(
     `Assign batch ${selectedRows.length} project?\n\n`+
-    `Rule hiện tại: theo Sort ID team Web, ví dụ Tony → Alex → Lucas → Allen → Hayden → Leo. `+
-    `Khi ngày hiện tại đủ người thì tự chuyển sang ngày tiếp theo và quay lại người đầu tiên.`+
-    (skippedAlreadyAssigned?`\n\nĐã bỏ qua ${skippedAlreadyAssigned} project đã có assignee để không assign trùng.`:"")
+    `Rule: theo Sort ID team Web, ví dụ Tony → Alex → Lucas → Allen → Hayden → Leo. `+
+    `Khi hết vòng trong ngày thì tự chuyển sang ngày tiếp theo và quay lại người đầu tiên.`+
+    (skippedAlreadyAssigned?`\n\nĐã bỏ qua ${skippedAlreadyAssigned} project đã có assignee / Calendar task để không assign trùng.`:"")
   );
 
   if(!ok)return;
@@ -2987,76 +3027,61 @@ async function bulkAssignSelected(){
       type:x.type
     })));
 
-    const sourceIds=prepared.map(x=>x.source_id);
-
-    toast("Đang xóa task cũ nếu có...", "#f05a28");
-
-    for(const chunk of chunkList(sourceIds,100)){
-      const {error}=await supabaseClient
-        .from("tasks")
-        .delete()
-        .in("source_id",chunk);
-
-      if(error)throw error;
-
-      await sleep(0);
-    }
-
-    toast("Đang thêm task vào Calendar...", "#f05a28");
-
+    const CHUNK=25;
     const insertedMap={};
 
-    for(const chunk of chunkList(prepared.map(x=>x.taskPayload),100)){
+    // Không delete task cũ nữa. Nếu task đã tồn tại thì đã bị skip ở safety gate.
+    toast("Đang thêm task vào Calendar...", "#f05a28");
+
+    for(let i=0;i<prepared.length;i+=CHUNK){
+      const chunk=prepared.slice(i,i+CHUNK);
       const {data,error}=await supabaseClient
         .from("tasks")
-        .insert(chunk)
+        .insert(chunk.map(x=>x.taskPayload))
         .select("id,source_id");
 
       if(error)throw error;
 
-      (data||[]).forEach(t=>{
-        insertedMap[t.source_id]=t.id;
-      });
+      (data||[]).forEach(t=>{insertedMap[t.source_id]=t.id;});
 
-      await sleep(0);
+      toast(`Đang thêm Calendar ${Math.min(i+CHUNK,prepared.length)}/${prepared.length}...`, "#f05a28");
+      await yieldUi();
     }
 
     toast("Đang cập nhật Queue assigned...", "#f05a28");
 
-    for(const chunk of chunkList(prepared.map(x=>x.queuePayload),100)){
+    for(let i=0;i<prepared.length;i+=CHUNK){
+      const chunk=prepared.slice(i,i+CHUNK);
       const {error}=await supabaseClient
         .from("task_queue")
-        .upsert(chunk,{onConflict:"source_id",ignoreDuplicates:false});
+        .upsert(chunk.map(x=>x.queuePayload),{onConflict:"source_id",ignoreDuplicates:false});
 
       if(error)throw error;
 
-      await sleep(0);
+      toast(`Đang cập nhật Queue ${Math.min(i+CHUNK,prepared.length)}/${prepared.length}...`, "#f05a28");
+      await yieldUi();
     }
 
-    document
-      .querySelectorAll(".queue-domain-check")
-      .forEach(cb=>cb.checked=false);
+    document.querySelectorAll(".queue-domain-check").forEach(cb=>cb.checked=false);
 
     const lastDate=prepared[prepared.length-1]?.plan?.date;
     const d=new Date(lastDate+"T00:00:00");
     if(!isNaN(d.getTime()))current=d;
 
-    toast(`Đã assign ${prepared.length} task. Đang gửi Telegram...`, "#2e7d32");
-
-    // Gửi notification theo cụm nhỏ để tránh treo trang.
+    // Telegram/log chạy nền, không block UI.
     sendBulkAssignNotifications(prepared, insertedMap)
       .then(()=>console.log("Bulk Telegram/log done"))
       .catch(e=>console.error("Bulk Telegram/log error",e));
 
-    await loadQueue();
-
     const sec=Math.round((Date.now()-startedAt)/1000);
     toast(`Assign batch xong ${prepared.length} task trong ${sec}s`, "#2e7d32");
 
+    // Reload duy nhất 1 lần cuối cùng.
+    await loadQueue();
     showPage("calendar");
 
   }catch(e){
-    console.error("Bulk assign optimized failed", e);
+    console.error("Bulk assign fast failed", e);
     toast("Lỗi assign batch: "+(e.message||e), "#b71c1c");
   }
 }
