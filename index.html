@@ -718,7 +718,7 @@ td .badge.urgent{margin-top:4px}
         <div class="tools">
           <button class="primary" onclick="syncQueueFromApi()">Sync Sheet</button>
           <button onclick="loadQueue()">Reload</button>
-          <button class="ghost" onclick="patchOldQueueDomainPackage()">Update domain/gói</button>
+          <button class="ghost" onclick="patchOldQueueDomainPackage()">Update full data cũ</button>
           <button class="ghost" onclick="fixAssignedQueueStatus()">Fix assigned</button>
           <button class="ghost" onclick="syncAssignedFromCalendarByMonth()">Sync tháng</button>
           <button class="primary" onclick="bulkAssignSelected()">Assign batch</button>
@@ -968,6 +968,63 @@ function formatDate(y,m,d){return `${y}-${String(m+1).padStart(2,"0")}-${String(
 function todayStr(){return new Date().toISOString().slice(0,10)}
 function toDateInput(v){if(!v)return null;if(typeof v==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(v))return v;const d=new Date(v);return isNaN(d.getTime())?null:d.toISOString().slice(0,10)}
 function normalizeProjectId(project){return String(project||"").trim().toUpperCase().replace(/[^\w\s-]/g,"").replace(/\s+/g,"-").slice(0,180)}
+
+function pickSheetValue(row, keys){
+  for(const key of keys){
+    if(row && row[key]!==undefined && row[key]!==null && String(row[key]).trim()!==""){
+      return String(row[key]).trim();
+    }
+  }
+  return "";
+}
+
+function normalizeSheetQueueRow(r, idx, nowIso, isCurrentDefault=false){
+  const project=pickSheetValue(r,[
+    "project","Project","Projects","PROJECT",
+    "Tên project","Ten project","Project Name","project_name"
+  ]);
+
+  let sourceId=normalizeProjectId(
+    project || pickSheetValue(r,["source_id","Source ID","id","ID","sourceId"])
+  );
+
+  if(!sourceId)sourceId="ROW-"+String(r?.row_number||r?.row||r?.source_row||idx+1);
+
+  const packageName=pickSheetValue(r,[
+    "package_name","Package","package","Gói","Goi","Gói web","Goi web"
+  ]) || pkgFromProject(project||sourceId);
+
+  return {
+    source_id:sourceId,
+    project:project,
+    am:pickSheetValue(r,["am","AM","Account Manager","account_manager","Sale","Sales"]),
+    start_date:toDateInput(r?.start||r?.Start||r?.start_date||r?.["Start Date"]||r?.["Ngày bắt đầu"]||r?.["Ngay bat dau"]),
+    expired_date:toDateInput(r?.expired||r?.Expired||r?.expired_date||r?.["Expired Date"]||r?.["Ngày hết hạn"]||r?.["Ngay het han"]),
+    template_url:pickSheetValue(r,["template","Template","template_url","Template URL","Template màu","Template mau","Template Color"]),
+    layout_url:pickSheetValue(r,["layout","Layout","layout_url","Layout URL","Layout web","Layout Web","Layout Website"]),
+    domain_url:pickSheetValue(r,["domain","Domain","domain_url","Domain URL","Link web live","Website","Web live"]),
+    package_name:packageName,
+    source_status:pickSheetValue(r,["status","Status","Trạng thái","Trang thai"])||"Doing",
+    source_row:r?.row_number||r?.row||r?.source_row ? String(r.row_number||r.row||r.source_row) : null,
+    note:pickSheetValue(r,["note","Note","Ghi chú","Ghi chu"])||null,
+    is_current:isCurrentDefault,
+    force_current:false,
+    last_seen_at:nowIso,
+    updated_at:nowIso
+  };
+}
+
+function getSheetSourceIdFromRow(r, idx){
+  const project=pickSheetValue(r,[
+    "project","Project","Projects","PROJECT",
+    "Tên project","Ten project","Project Name","project_name"
+  ]);
+  let sourceId=normalizeProjectId(
+    project || pickSheetValue(r,["source_id","Source ID","id","ID","sourceId"])
+  );
+  if(!sourceId)sourceId="ROW-"+String(r?.row_number||r?.row||r?.source_row||idx+1);
+  return sourceId;
+}
 function pkgFromProject(project){
   const text=String(project||"").trim();
 
@@ -1371,9 +1428,8 @@ async function loadSheetAllProjectsJsonp(){
     throw new Error("Chưa nhập Apps Script API URL");
   }
 
-  return await loadSheetQueueJsonp(`${settings.sheetApi}${settings.sheetApi.includes("?")?"&":"?"}action=all_projects`);
+  return loadSheetQueueJsonp(settings.sheetApi,"all_projects");
 }
-
 
 
 
@@ -1611,77 +1667,208 @@ async function fixAssignedQueueStatus(){
 async function patchOldQueueDomainPackage(){
   if(!requireDb())return;
 
-  try{
-    toast("Đang cập nhật domain/gói cho queue cũ...", "#f05a28");
+  if(!settings.sheetApi){
+    toast("Chưa nhập Apps Script API URL","#b71c1c");
+    return;
+  }
 
-    const json=await loadSheetAllProjectsJsonp();
+  try{
+    toast("Đang cập nhật full data cũ từ Sheet...", "#f05a28");
+
+    const json=await loadSheetQueueJsonp(settings.sheetApi,"all_projects");
 
     if(!json)throw new Error("Apps Script API không trả dữ liệu");
     if(json.success===false)throw new Error(json.error||"all_projects API lỗi");
 
-    const rows=json.data||[];
+    const rows=Array.isArray(json)?json:(json.data||[]);
 
     if(!rows.length){
       toast("Không có dữ liệu all_projects từ Sheet", "#8a6d00");
       return;
     }
 
-    const payload=rows.map(r=>{
-      const project=String(r.project||r.Project||r.Projects||"").trim();
-      const sourceId=normalizeProjectId(project||r.source_id||"");
+    const nowIso=new Date().toISOString();
 
-      return {
-        source_id:sourceId,
-        project:project,
-        domain_url:String(r.domain||r.Domain||r.domain_url||r["Domain"]||r["Link web live"]||"").trim(),
-        package_name:pkgFromProject(project),
-        updated_at:new Date().toISOString()
-      };
-    }).filter(r=>r.source_id);
+    let payload=rows
+      .map((r,idx)=>normalizeSheetQueueRow(r,idx,nowIso,false))
+      .filter(r=>r.source_id&&r.project);
 
     const seen=new Set();
-    const uniquePayload=payload.filter(r=>{
-      if(seen.has(r.source_id))return false;
+    payload=payload.filter(r=>{
+      if(seen.has(r.source_id)){
+        logDebug("Duplicate source_id skipped",r.source_id);
+        return false;
+      }
       seen.add(r.source_id);
       return true;
     });
 
-    let updated=0;
-
-    for(let i=0;i<uniquePayload.length;i+=300){
-      const chunk=uniquePayload.slice(i,i+300);
-
-      await upsertTaskQueueInChunks(chunk,500);
-
-      updated+=chunk.length;
+    if(!payload.length){
+      toast("Không có project hợp lệ để update", "#8a6d00");
+      return;
     }
 
-    toast(`Đã cập nhật domain/gói cho ${updated} project`, "#2e7d32");
+    const updated=await upsertTaskQueueInChunks(payload,500);
+
+    toast(`Đã cập nhật full data cho ${updated} project cũ`, "#2e7d32");
 
     await loadQueue();
 
   }catch(e){
     console.error(e);
-    toast("Lỗi update domain/gói cũ: "+(e.message||e), "#b71c1c");
+    toast("Lỗi update full data cũ: "+(e.message||e), "#b71c1c");
   }
 }
 
-async function syncQueueFromApi(){clearDebug();console.group("[Task Queue] Sync Sheet");logDebug("[Task Queue] Sync Sheet");if(!requireDb()){console.groupEnd();return}if(!settings.sheetApi){toast("Chưa nhập Apps Script API URL","#b71c1c");console.groupEnd();return}try{toast("Đang sync từ Sheet...","#f05a28");const json=await loadSheetQueueJsonp(settings.sheetApi);logDebug("Raw API response",json);if(!json)throw new Error("Apps Script API không trả dữ liệu");if(json.success===false)throw new Error(json.error||"Apps Script API success=false");const rows=Array.isArray(json)?json:(json.data||[]);console.log("DOMAIN CHECK FROM GAS:",rows.map(r=>({project:r.project,domain:r.domain,Domain:r.Domain,domain_url:r.domain_url})));const nowIso=new Date().toISOString();await supabaseClient.from("task_queue").update({is_current:false}).neq("source_id","__never__");
+async function syncQueueFromApi(){
+  clearDebug();
+  console.group("[Task Queue] Sync Full Sheet");
+  logDebug("[Task Queue] Sync Full Sheet");
 
-// Giữ lại các tiệm được add thủ công vào "Tiệm mới đủ info" dù sync Sheet không còn đủ filter.
-try{
-  await supabaseClient
-    .from("task_queue")
-    .update({is_current:true,updated_at:nowIso})
-    .eq("force_current",true);
-}catch(forceErr){
-  console.warn("force_current column may be missing. Run SQL patch.", forceErr);
-}let payload=rows.map((r,idx)=>{const project=String(r.project||r.Project||r.Projects||"").trim();let sourceId=normalizeProjectId(project||r.source_id||"");if(!sourceId)sourceId="ROW-"+String(r.row_number||idx+1);return{source_id:sourceId,project,am:String(r.am||r.AM||"").trim(),start_date:toDateInput(r.start||r.Start||r.start_date),expired_date:toDateInput(r.expired||r.Expired||r.expired_date),template_url:String(r.template||r.template_url||r["Template màu"]||"").trim(),layout_url:String(r.layout||r.layout_url||r["Layout web"]||"").trim(),domain_url:String(r.domain||r.Domain||r.domain_url||r["Domain"]||r["Link web live"]||"").trim(),package_name:r.package_name||pkgFromProject(project),source_status:r.status||r.Status||"Doing",queue_status:"NEW",source_row:r.row_number?String(r.row_number):null,note:r.note||null,is_current:true,force_current:false,last_seen_at:nowIso,updated_at:nowIso}}).filter(r=>r.source_id&&r.project);const seen=new Set();payload=payload.filter(x=>{if(seen.has(x.source_id)){logDebug("Duplicate source_id skipped",x.source_id);return false}seen.add(x.source_id);return true});logDebug("Payload", {total:payload.length, firstFive:payload.slice(0,5)});if(!payload.length){toast("API không có task hợp lệ","#8a6d00");return}const totalUpserted=await upsertTaskQueueInChunks(payload,500);
-logDebug("Supabase upsert result",{count:totalUpserted,error:null});
-queueStatusFilter.value="CURRENT";
-toast(`Đã sync ${payload.length} task vào queue`,"#2e7d32");
-await loadQueue()}catch(e){console.error(e);logDebug("SYNC ERROR",e.message||e);toast("Sync lỗi: "+(e.message||e),"#b71c1c")}finally{console.groupEnd()}}
-function loadSheetQueueJsonp(apiUrl){return new Promise((resolve,reject)=>{const cb="sheetQueueCb_"+Date.now()+"_"+Math.floor(Math.random()*100000);const sep=apiUrl.includes("?")?"&":"?";const url=`${apiUrl}${sep}action=queue&callback=${cb}`;logDebug("JSONP request URL",url);const s=document.createElement("script");const timer=setTimeout(()=>{cleanup();reject(new Error("Sheet API timeout sau 20s"))},20000);function cleanup(){clearTimeout(timer);delete window[cb];if(s.parentNode)s.parentNode.removeChild(s)}window[cb]=data=>{logDebug("JSONP callback received",data);cleanup();resolve(data)};s.onerror=()=>{cleanup();reject(new Error("Không load được Apps Script API"))};s.onload=()=>logDebug("JSONP script loaded");s.src=url;document.body.appendChild(s)})}
+  if(!requireDb()){
+    console.groupEnd();
+    return;
+  }
+
+  if(!settings.sheetApi){
+    toast("Chưa nhập Apps Script API URL","#b71c1c");
+    console.groupEnd();
+    return;
+  }
+
+  try{
+    toast("Đang sync toàn bộ data từ Sheet...","#f05a28");
+
+    const nowIso=new Date().toISOString();
+
+    const allJson=await loadSheetQueueJsonp(settings.sheetApi,"all_projects");
+    logDebug("Raw all_projects response",allJson);
+
+    if(!allJson)throw new Error("Apps Script API không trả dữ liệu all_projects");
+    if(allJson.success===false)throw new Error(allJson.error||"all_projects API lỗi");
+
+    const allRows=Array.isArray(allJson)?allJson:(allJson.data||[]);
+
+    if(!allRows.length){
+      throw new Error("all_projects không có dữ liệu. Kiểm tra Apps Script action=all_projects");
+    }
+
+    const queueJson=await loadSheetQueueJsonp(settings.sheetApi,"queue");
+    logDebug("Raw queue response",queueJson);
+
+    if(!queueJson)throw new Error("Apps Script API không trả dữ liệu queue");
+    if(queueJson.success===false)throw new Error(queueJson.error||"queue API lỗi");
+
+    const queueRowsFromApi=Array.isArray(queueJson)?queueJson:(queueJson.data||[]);
+
+    const currentIds=new Set(
+      queueRowsFromApi
+        .map((r,idx)=>getSheetSourceIdFromRow(r,idx))
+        .filter(Boolean)
+    );
+
+    await supabaseClient
+      .from("task_queue")
+      .update({is_current:false,updated_at:nowIso})
+      .neq("source_id","__never__");
+
+    let payload=allRows
+      .map((r,idx)=>{
+        const item=normalizeSheetQueueRow(r,idx,nowIso,false);
+        item.is_current=currentIds.has(item.source_id);
+        return item;
+      })
+      .filter(r=>r.source_id&&r.project);
+
+    const seen=new Set();
+    payload=payload.filter(x=>{
+      if(seen.has(x.source_id)){
+        logDebug("Duplicate source_id skipped",x.source_id);
+        return false;
+      }
+      seen.add(x.source_id);
+      return true;
+    });
+
+    logDebug("Full payload",{
+      total:payload.length,
+      current:payload.filter(x=>x.is_current).length,
+      firstFive:payload.slice(0,5)
+    });
+
+    if(!payload.length){
+      toast("API không có project hợp lệ","#8a6d00");
+      return;
+    }
+
+    const totalUpserted=await upsertTaskQueueInChunks(payload,500);
+
+    // Giữ lại các tiệm được add thủ công vào "Tiệm mới đủ info" dù sync Sheet không còn đủ filter.
+    try{
+      await supabaseClient
+        .from("task_queue")
+        .update({is_current:true,updated_at:nowIso})
+        .eq("force_current",true);
+    }catch(forceErr){
+      console.warn("force_current column may be missing. Run SQL patch.",forceErr);
+    }
+
+    logDebug("Supabase full upsert result",{
+      count:totalUpserted,
+      current:currentIds.size
+    });
+
+    queueStatusFilter.value="CURRENT";
+
+    toast(`Đã sync ${payload.length} project từ Sheet, trong đó ${currentIds.size} tiệm mới đủ info`,"#2e7d32");
+
+    await loadQueue();
+
+  }catch(e){
+    console.error(e);
+    logDebug("SYNC ERROR",e.message||e);
+    toast("Sync lỗi: "+(e.message||e),"#b71c1c");
+  }finally{
+    console.groupEnd();
+  }
+}
+
+function loadSheetQueueJsonp(apiUrl,action="queue"){
+  return new Promise((resolve,reject)=>{
+    const cb="sheetQueueCb_"+Date.now()+"_"+Math.floor(Math.random()*100000);
+    const sep=apiUrl.includes("?")?"&":"?";
+    const url=`${apiUrl}${sep}action=${encodeURIComponent(action)}&callback=${cb}`;
+
+    logDebug("JSONP request URL",url);
+
+    const s=document.createElement("script");
+    const timer=setTimeout(()=>{
+      cleanup();
+      reject(new Error("Sheet API timeout sau 20s"));
+    },20000);
+
+    function cleanup(){
+      clearTimeout(timer);
+      delete window[cb];
+      if(s.parentNode)s.parentNode.removeChild(s);
+    }
+
+    window[cb]=data=>{
+      logDebug("JSONP callback received",data);
+      cleanup();
+      resolve(data);
+    };
+
+    s.onerror=()=>{
+      cleanup();
+      reject(new Error("Không load được Apps Script API"));
+    };
+
+    s.onload=()=>logDebug("JSONP script loaded");
+    s.src=url;
+    document.body.appendChild(s);
+  });
+}
 
 function toggleQueueCheckAll(checked){
   document
