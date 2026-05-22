@@ -1075,9 +1075,9 @@ function normalizeSheetQueueRow(r, idx, nowIso, isCurrentDefault=false){
 
   if(!sourceId)sourceId="ROW-"+String(r?.row_number||r?.row||r?.source_row||idx+1);
 
-  const packageName=pickSheetValue(r,[
-    "package_name","Package","package","Gói","Goi","Gói web","Goi web"
-  ]) || pkgFromProject(project||sourceId);
+  // Package phải tính đúng theo công thức Sheet từ Project.
+  // Không ưu tiên package_name cũ từ database/API vì dễ bị stale và sai gói.
+  const packageName=pkgFromProject(project||sourceId);
 
   return {
     source_id:sourceId,
@@ -1135,10 +1135,15 @@ function pkgFromProject(project){
 
   if(!text)return "Gói Custom";
 
+  // Giống công thức Sheet:
+  // Nếu project có dấu * => Gói Custom
   if(/\*/.test(text))return "Gói Custom";
 
-  // Google Sheets MID(Project,6,1) = JS charAt(5)
-  const c=text.charAt(5).toUpperCase();
+  // Sheet đang dùng MID(A,6,1), nhưng trong app source_id có thể bị thêm dấu gạch ngang
+  // hoặc có khoảng trắng đầu dòng. Vì vậy lấy ký tự sau 5 số đầu tiên để ổn định hơn.
+  // Ví dụ: 29611SE1 PROX3... hoặc 29611SE1-PROX3... => S => Gói S
+  const match=text.toUpperCase().match(/(\d{5})([0-9SPGF])/);
+  const c=match ? match[2] : text.charAt(5).toUpperCase();
 
   if(c==="0")return "Gói Menu + QR";
 
@@ -1401,7 +1406,7 @@ async function loadQueue(){
     console.error(error);
   }
 }
-function renderQueueFilters(){const cur=queuePackageFilter.value;const ps=[...new Set(queueRows.map(r=>r.package_name||pkgFromId(r.source_id)).filter(Boolean))].sort();queuePackageFilter.innerHTML='<option value="">Tất cả gói</option>'+ps.map(p=>`<option>${esc(p)}</option>`).join("");queuePackageFilter.value=cur}
+function renderQueueFilters(){const cur=queuePackageFilter.value;const ps=[...new Set(queueRows.map(r=>pkgFromProject(r.project||r.source_id)).filter(Boolean))].sort();queuePackageFilter.innerHTML='<option value="">Tất cả gói</option>'+ps.map(p=>`<option>${esc(p)}</option>`).join("");queuePackageFilter.value=cur}
 function getQueueRowsByFilter(filterValue){
   let rows=[...queueRows];
 
@@ -1534,7 +1539,7 @@ function buildAssignedMonthRowsFromCalendarTasks(tasks,queueList){
       source_id:sourceId,
       project,
       am:matched?.am||task.am||"",
-      package_name:matched?.package_name||task.package_name||pkgFromProject(project),
+      package_name:pkgFromProject(project||task.source_id),
       note:matched?.note||task.note||"",
       queue_status:"ASSIGNED",
       assigned_person:task.person||matched?.assigned_person||"",
@@ -1575,7 +1580,7 @@ function buildDomainReportRowsFromCalendarTasks(tasks,queueList,month){
       source_id:sourceId,
       project,
       am:matched.am||task.am||"",
-      package_name:matched.package_name||task.package_name||pkgFromProject(project),
+      package_name:pkgFromProject(project||task.source_id),
       note:matched.note||task.note||"",
       queue_status:"ASSIGNED",
       assigned_person:task.person||matched.assigned_person||"",
@@ -1734,7 +1739,7 @@ async function buildAssignedQueuePayloadFromTasks(tasks,monthLabel=""){
       template_url:matchedRow?.template_url||null,
       layout_url:matchedRow?.layout_url||null,
       domain_url:matchedRow?.domain_url||null,
-      package_name:matchedRow?.package_name||t.package_name||pkgFromProject(project),
+      package_name:pkgFromProject(project||t.source_id),
       source_status:matchedRow?.source_status||"Doing",
       source_row:matchedRow?.source_row||null,
       queue_status:"ASSIGNED",
@@ -1765,7 +1770,7 @@ async function buildAssignedQueuePayloadFromTasks(tasks,monthLabel=""){
 
 function queueRowHtml(r){
   const st=r.queue_status||"NEW";
-  const pn=r.package_name||pkgFromProject(r.project||r.source_id);
+  const pn=pkgFromProject(r.project||r.source_id);
   const domain=String(r.domain_url||"").trim();
   const rowCls=st==="ASSIGNED"?"queue-row-assigned":st==="PENDING_INFO"?"queue-row-pending":st==="SKIPPED"?"queue-row-skipped":r.is_current?"queue-row-current":"";
   const assignedMonth=String(r.assigned_month||r.assigned_date||"").slice(0,7);
@@ -1831,7 +1836,7 @@ function renderQueue(){
   }
 
   if(pkg){
-    rows=rows.filter(r=>(r.package_name||pkgFromProject(r.project||r.source_id))===pkg);
+    rows=rows.filter(r=>pkgFromProject(r.project||r.source_id)===pkg);
   }
 
   if(assignMonth&&!calendarMonthMode){
@@ -1846,7 +1851,7 @@ function renderQueue(){
       r.source_id,
       r.project,
       r.am,
-      r.package_name,
+      pkgFromProject(r.project||r.source_id),
       r.domain_url,
       r.assigned_person,
       r.assigned_month
@@ -2077,7 +2082,7 @@ function renderDomainReport(){
       <td>${esc(r.am||"")}</td>
       <td>${domain?`<span class="queue-domain-real">${esc(domain)}</span>`:`<span class="muted">-</span>`}</td>
       <td><span class="badge assigned">Đã báo</span><br><span class="muted">${formatDomainNotifyTime(r.domain_notified_at)}</span></td>
-      <td><span class="badge">${esc(r.package_name||pkgFromProject(r.project||r.source_id))}</span></td>
+      <td><span class="badge">${esc(pkgFromProject(r.project||r.source_id))}</span></td>
       <td><span class="badge ${statusCls}">${esc(status)}</span></td>
       <td>${esc(r.assigned_month||"")}</td>
       <td>${esc(r.assigned_person||"-")}</td>
@@ -3220,7 +3225,7 @@ async function getNextAssignSlot(){
   };
 }
 
-async function assignQueueTask(){if(!requireDb()||!selectedQueue)return;const person=assignPerson.value,taskDate=assignDate.value,type=assignType.value,am=assignAM.value||"None",text=assignText.value.trim();if(!text||!person||!taskDate||!type){toast("Thiếu thông tin assign","#b71c1c");return}const sourceId=selectedQueue.source_id;const webMember=memberByName(person),amMember=memberByName(am);const payload={source_id:sourceId,task_date:taskDate,text,person,type,am,done:false,sort_order:999,priority:assignPriority.value,package_name:selectedQueue.package_name||pkgFromProject(text),note:assignNote.value||null};let taskId=null;const {data:exist,error:checkErr}=await supabaseClient.from("tasks").select("id").eq("source_id",sourceId).limit(1);if(checkErr){toast("Lỗi check task: "+checkErr.message,"#b71c1c");return}if(exist&&exist.length){taskId=exist[0].id;const {error}=await supabaseClient.from("tasks").update(payload).eq("id",taskId);if(error){toast("Lỗi update task: "+error.message,"#b71c1c");return}}else{const {data,error}=await supabaseClient.from("tasks").insert(payload).select("id").single();if(error){toast("Lỗi insert task: "+error.message,"#b71c1c");return}taskId=data?.id||null}const {error:qErr}=await supabaseClient.from("task_queue").update({queue_status:"ASSIGNED",is_current:false,force_current:false,assigned_person:person,assigned_date:taskDate,assigned_month:String(taskDate).slice(0,7),assigned_month_note:`Assigned trong Calendar tháng ${String(taskDate).slice(0,7)}`,priority:assignPriority.value,updated_at:new Date().toISOString()}).eq("source_id",sourceId);if(qErr){toast("Task đã add nhưng lỗi update queue: "+qErr.message,"#b71c1c");return}const msg=`Project: ${text}\nType: ${type}\n\nMember: ${person}\nAM: ${am}\n📅 ${taskDate}`;await sendTelegram({event:"new",person,person_chat_id:webMember?.telegram_chat_id||"",am,am_chat_id:amMember?.telegram_chat_id||"",type,message:msg});await logAction("assign",taskId,sourceId,text,person,`Assigned to ${person} / AM ${am}`,am);closeModal("assignModal");toast("Đã add vào calendar","#2e7d32");const d=new Date(taskDate+"T00:00:00");if(!isNaN(d.getTime()))current=d;await Promise.all([loadQueue(),render()]);showPage("calendar")}
+async function assignQueueTask(){if(!requireDb()||!selectedQueue)return;const person=assignPerson.value,taskDate=assignDate.value,type=assignType.value,am=assignAM.value||"None",text=assignText.value.trim();if(!text||!person||!taskDate||!type){toast("Thiếu thông tin assign","#b71c1c");return}const sourceId=selectedQueue.source_id;const webMember=memberByName(person),amMember=memberByName(am);const payload={source_id:sourceId,task_date:taskDate,text,person,type,am,done:false,sort_order:999,priority:assignPriority.value,package_name:pkgFromProject(text||sourceId),note:assignNote.value||null};let taskId=null;const {data:exist,error:checkErr}=await supabaseClient.from("tasks").select("id").eq("source_id",sourceId).limit(1);if(checkErr){toast("Lỗi check task: "+checkErr.message,"#b71c1c");return}if(exist&&exist.length){taskId=exist[0].id;const {error}=await supabaseClient.from("tasks").update(payload).eq("id",taskId);if(error){toast("Lỗi update task: "+error.message,"#b71c1c");return}}else{const {data,error}=await supabaseClient.from("tasks").insert(payload).select("id").single();if(error){toast("Lỗi insert task: "+error.message,"#b71c1c");return}taskId=data?.id||null}const {error:qErr}=await supabaseClient.from("task_queue").update({queue_status:"ASSIGNED",is_current:false,force_current:false,assigned_person:person,assigned_date:taskDate,assigned_month:String(taskDate).slice(0,7),assigned_month_note:`Assigned trong Calendar tháng ${String(taskDate).slice(0,7)}`,priority:assignPriority.value,updated_at:new Date().toISOString()}).eq("source_id",sourceId);if(qErr){toast("Task đã add nhưng lỗi update queue: "+qErr.message,"#b71c1c");return}const msg=`Project: ${text}\nType: ${type}\n\nMember: ${person}\nAM: ${am}\n📅 ${taskDate}`;await sendTelegram({event:"new",person,person_chat_id:webMember?.telegram_chat_id||"",am,am_chat_id:amMember?.telegram_chat_id||"",type,message:msg});await logAction("assign",taskId,sourceId,text,person,`Assigned to ${person} / AM ${am}`,am);closeModal("assignModal");toast("Đã add vào calendar","#2e7d32");const d=new Date(taskDate+"T00:00:00");if(!isNaN(d.getTime()))current=d;await Promise.all([loadQueue(),render()]);showPage("calendar")}
 async function markQueuePending(){if(!requireDb()||!selectedQueue)return;await supabaseClient.from("task_queue").update({queue_status:"PENDING_INFO",force_current:false,is_current:false,updated_at:new Date().toISOString()}).eq("source_id",selectedQueue.source_id);closeModal("assignModal");await loadQueue()}
 
 
@@ -3454,7 +3459,7 @@ async function assignQueueRowAuto(row,forcedSlot=null){
     done:false,
     sort_order:999,
     priority:"Normal",
-    package_name:row.package_name||pkgFromProject(text),
+    package_name:pkgFromProject(text||row.source_id),
     note:row.note||null
   };
 
@@ -3599,7 +3604,7 @@ async function restoreQueueAssigneeFromTasks(skipItems){
       template_url:x.row.template_url||null,
       layout_url:x.row.layout_url||null,
       domain_url:x.row.domain_url||null,
-      package_name:x.row.package_name||x.task.package_name||pkgFromProject(x.row.project||x.task.text),
+      package_name:pkgFromProject(x.row.project||x.task.text||x.row.source_id),
       source_status:x.row.source_status||"Doing",
       source_row:x.row.source_row||null,
       queue_status:"ASSIGNED",
@@ -3739,7 +3744,7 @@ async function bulkAssignSelected(){
       const sourceId=row.source_id;
       const type=inferType(row);
       const am=row.am||"None";
-      const packageName=row.package_name||pkgFromProject(text);
+      const packageName=pkgFromProject(text||row.source_id);
 
       return {
         row,
