@@ -683,6 +683,7 @@ td .badge.urgent{margin-top:4px}
         <button class="active" data-page="queue" data-queue-filter="CURRENT">📥 Task Queue</button>
         <div class="nav-sub">
           <button class="active" data-page="queue" data-queue-filter="CURRENT">Tiệm mới đủ info <span class="nav-count" id="navCountCurrent">0</span></button>
+          <button data-page="domain_report">Quản lí domain đã báo <span class="nav-count" id="navCountDomainReported">0</span></button>
           <button data-page="queue" data-queue-filter="NEW">Chưa assign <span class="nav-count" id="navCountNew">0</span></button>
           <button data-page="queue" data-queue-filter="ASSIGNED">Đã assign <span class="nav-count" id="navCountAssigned">0</span></button>
           <button data-page="queue" data-queue-filter="PENDING_INFO">Pending info <span class="nav-count" id="navCountPending">0</span></button>
@@ -855,6 +856,80 @@ td .badge.urgent{margin-top:4px}
       </div>
     </section>
 
+    <section id="page-domain_report" class="hidden">
+      <div class="top">
+        <div>
+          <h2>🌐 Quản lí domain đã báo</h2>
+          <div class="sub">Theo dõi các project đã báo domain, lọc theo tháng và sort nhanh.</div>
+        </div>
+        <div class="tools">
+          <button onclick="loadDomainReport()">Reload</button>
+        </div>
+      </div>
+
+      <div class="kpi-compact-row">
+        <div class="kpi-compact">
+          <div class="label">Domain đã báo trong tháng</div>
+          <div class="value" id="domainReportMonthCount">0</div>
+          <div class="hint">Tính theo thời gian báo domain</div>
+        </div>
+        <div class="kpi-compact">
+          <div class="label">Đã báo nhưng chưa assign</div>
+          <div class="value" id="domainReportUnassignedCount">0</div>
+          <div class="hint">Vẫn còn trong Tiệm mới đủ info</div>
+        </div>
+      </div>
+
+      <div class="card queue-table-card">
+        <div class="queue-section-title">
+          <div>
+            <h3>Danh sách domain đã báo</h3>
+            <div class="muted" id="domainReportSummary">Đang hiển thị 0 project</div>
+          </div>
+          <div class="muted">Có thể lọc tháng, sort và đánh dấu lại trạng thái báo domain.</div>
+        </div>
+
+        <div class="queue-toolbar">
+          <div class="queue-toolbar-left">
+            <input id="domainReportMonth" class="queue-month-input" type="month" onchange="renderDomainReport()" title="Lọc theo tháng báo domain">
+            <select id="domainReportSort" onchange="renderDomainReport()">
+              <option value="notified_desc">Mới báo gần nhất</option>
+              <option value="notified_asc">Báo cũ nhất</option>
+              <option value="source_row_asc">Theo thứ tự Sheet</option>
+              <option value="project_asc">Theo tên project A-Z</option>
+              <option value="am_asc">Theo AM A-Z</option>
+              <option value="domain_asc">Theo domain A-Z</option>
+              <option value="unassigned_first">Chưa assign lên trước</option>
+            </select>
+            <input id="domainReportSearch" class="queue-search-input" placeholder="Tìm project / AM / domain / source id..." oninput="renderDomainReport()">
+          </div>
+          <div class="queue-toolbar-right">
+            <button class="ghost" onclick="domainReportSearch.value='';renderDomainReport()">Clear search</button>
+          </div>
+        </div>
+
+        <div class="wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Source ID</th>
+                <th>Project</th>
+                <th>AM</th>
+                <th>Domain</th>
+                <th>Thời gian báo</th>
+                <th>Gói</th>
+                <th>Status</th>
+                <th>Assign Month</th>
+                <th>Assignee</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="domainReportBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <section id="page-logs" class="hidden">
       <div class="top"><div><h2>🧾 Audit Logs</h2><div class="sub">Theo dõi assign, unassign, delete, move, done.</div></div><button onclick="loadAuditLogs()">Reload</button></div>
       <div class="card"><div class="wrap"><table><thead><tr><th>Time</th><th>Action</th><th>Project</th><th>Person</th><th>AM</th><th>Detail</th></tr></thead><tbody id="logsBody"></tbody></table></div></div>
@@ -931,8 +1006,10 @@ td .badge.urgent{margin-top:4px}
 
 
 
-<div id="queueContextMenu" style="position:fixed;display:none;z-index:200;background:#fff;border:1px solid var(--line);box-shadow:0 12px 30px rgba(0,0,0,.18);border-radius:12px;overflow:hidden;min-width:230px">
+<div id="queueContextMenu" style="position:fixed;display:none;z-index:200;background:#fff;border:1px solid var(--line);box-shadow:0 12px 30px rgba(0,0,0,.18);border-radius:12px;overflow:hidden;min-width:250px">
   <button style="display:block;width:100%;text-align:left;border-radius:0;background:#fff;padding:10px 12px" onclick="contextAddToCurrentQueue()">➕ Add vào Tiệm mới đủ info</button>
+  <button style="display:block;width:100%;text-align:left;border-radius:0;background:#fff;padding:10px 12px" onclick="contextMarkDomainNotified()">✅ Đánh dấu đã báo domain</button>
+  <button style="display:block;width:100%;text-align:left;border-radius:0;background:#fff;padding:10px 12px" onclick="contextMarkDomainUnnotified()">↩️ Đánh dấu chưa báo domain</button>
   <button style="display:block;width:100%;text-align:left;border-radius:0;background:#fff;padding:10px 12px" onclick="contextSetPendingInfo()">🟡 Chuyển Pending info</button>
   <button style="display:block;width:100%;text-align:left;border-radius:0;background:#fff;padding:10px 12px" onclick="contextSkipQueue()">⛔ Skip project</button>
 </div>
@@ -1143,7 +1220,8 @@ function updateQueueMenuCounts(){
     assigned:queueRows.filter(r=>r.queue_status==="ASSIGNED").length,
     pending:queueRows.filter(r=>r.queue_status==="PENDING_INFO").length,
     skipped:queueRows.filter(r=>r.queue_status==="SKIPPED").length,
-    all:queueRows.length
+    all:queueRows.length,
+    domainReported:queueRows.filter(r=>r.domain_notified && isSameMonthValue(r.domain_notified_at, getCurrentDomainReportMonth())).length
   };
   if(document.getElementById("navCountCurrent"))navCountCurrent.textContent=counts.current;
   if(document.getElementById("navCountNew"))navCountNew.textContent=counts.new;
@@ -1151,6 +1229,7 @@ function updateQueueMenuCounts(){
   if(document.getElementById("navCountPending"))navCountPending.textContent=counts.pending;
   if(document.getElementById("navCountSkipped"))navCountSkipped.textContent=counts.skipped;
   if(document.getElementById("navCountAll"))navCountAll.textContent=counts.all;
+  if(document.getElementById("navCountDomainReported"))navCountDomainReported.textContent=counts.domainReported;
 }
 function setQueueMenuFilter(value){
   const finalValue=value||"CURRENT";
@@ -1160,7 +1239,7 @@ function setQueueMenuFilter(value){
   document.querySelectorAll(".nav button").forEach(btn=>{
     if(!btn.dataset.queueFilter)btn.classList.toggle("active",btn.dataset.page==="queue");
   });
-  ["queue","calendar","workload","report","members","logs","setup"].forEach(p=>document.getElementById(`page-${p}`).classList.toggle("hidden",p!=="queue"));
+  ["queue","domain_report","calendar","workload","report","members","logs","setup"].forEach(p=>document.getElementById(`page-${p}`).classList.toggle("hidden",p!=="queue"));
   loadQueue();
 }
 
@@ -1213,7 +1292,30 @@ function setupUi(){document.querySelectorAll(".nav button").forEach(b=>b.onclick
 function saveSettings(){settings.supabaseUrl=setSupabaseUrl.value.trim();settings.supabaseKey=setSupabaseKey.value.trim();settings.sheetApi=setSheetApi.value.trim();settings.telegramWebhook=setTelegram.value.trim();settings.domainGroupChatId=setDomainGroupChat.value.trim();settings.domainMention=setDomainMention.value.trim()||"@lee_web";localStorage.setItem("tm_settings",JSON.stringify(settings));initClient();toast("Đã lưu setup","#2e7d32");loadMembers()}
 function unlockEdit(){if(editCode.value===settings.editCode){canEdit=true;localStorage.setItem("tm_canEdit","1");updateEditState();renderCalendarOnly();toast("Edit unlocked","#2e7d32")}else toast("Wrong code","#b71c1c")}
 function updateEditState(){editState.textContent=canEdit?"✅ Đang mở quyền edit":"🔒 Chỉ xem"}
-function showPage(page){document.querySelectorAll(".nav button").forEach(b=>{if(page==="queue"){if(!b.dataset.queueFilter)b.classList.toggle("active",b.dataset.page==="queue")}else{b.classList.toggle("active",b.dataset.page===page&&!b.dataset.queueFilter)}});if(page!=="queue")document.querySelectorAll(".nav [data-queue-filter]").forEach(btn=>btn.classList.remove("active"));["queue","calendar","workload","report","members","logs","setup"].forEach(p=>document.getElementById(`page-${p}`).classList.toggle("hidden",p!==page));if(page==="queue")loadQueue();if(page==="calendar")render();if(page==="workload")renderWorkload();if(page==="report")renderReport();if(page==="members")loadMembers();if(page==="logs")loadAuditLogs()}
+function showPage(page){
+  document.querySelectorAll(".nav button").forEach(b=>{
+    if(page==="queue"){
+      if(!b.dataset.queueFilter)b.classList.toggle("active",b.dataset.page==="queue");
+    }else{
+      b.classList.toggle("active",b.dataset.page===page&&!b.dataset.queueFilter);
+    }
+  });
+
+  if(page!=="queue")document.querySelectorAll(".nav [data-queue-filter]").forEach(btn=>btn.classList.remove("active"));
+
+  ["queue","domain_report","calendar","workload","report","members","logs","setup"].forEach(p=>{
+    const el=document.getElementById(`page-${p}`);
+    if(el)el.classList.toggle("hidden",p!==page);
+  });
+
+  if(page==="queue")loadQueue();
+  if(page==="domain_report")loadDomainReport();
+  if(page==="calendar")render();
+  if(page==="workload")renderWorkload();
+  if(page==="report")renderReport();
+  if(page==="members")loadMembers();
+  if(page==="logs")loadAuditLogs();
+}
 
 async function sendTelegram(data){if(!settings.telegramWebhook)return;try{await fetch(settings.telegramWebhook,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(data)})}catch(e){console.error("Telegram error",e)}}
 async function logAction(action,taskId,sourceId,project,person,detail="",am=""){if(!supabaseClient)return;try{await supabaseClient.from("task_audit_logs").insert({action,task_id:taskId,source_id:sourceId,project,person,am,detail})}catch(e){console.warn("audit log failed",e)}}
@@ -1276,6 +1378,9 @@ async function loadQueue(){
     renderQueueFilters();
     renderQueue();
     renderQueueKpis();
+    if(document.getElementById("page-domain_report") && !document.getElementById("page-domain_report").classList.contains("hidden")){
+      renderDomainReport();
+    }
     logDebug("Loaded queue rows",queueRows.length);
   }catch(error){
     toast("Lỗi load queue: "+error.message,"#b71c1c");
@@ -1591,6 +1696,134 @@ function inferTaskTypeByProjectCode(project, fallbackRow){
   return "Design";
 }
 
+
+
+function getCurrentDomainReportMonth(){
+  const input=document.getElementById("domainReportMonth");
+  if(input && input.value)return input.value;
+
+  const d=new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+}
+
+function isSameMonthValue(value, month){
+  if(!value || !month)return false;
+  const d=new Date(value);
+  if(!isNaN(d.getTime())){
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`===month;
+  }
+  return String(value).slice(0,7)===month;
+}
+
+function formatDomainNotifyTime(value){
+  if(!value)return "-";
+  const d=new Date(value);
+  if(isNaN(d.getTime()))return esc(value);
+  return d.toLocaleString("en-US",{
+    month:"numeric",
+    day:"numeric",
+    year:"numeric",
+    hour:"numeric",
+    minute:"2-digit"
+  });
+}
+
+async function loadDomainReport(){
+  if(!document.getElementById("domainReportMonth"))return;
+
+  if(!domainReportMonth.value){
+    const d=new Date();
+    domainReportMonth.value=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+  }
+
+  if(!queueRows.length){
+    await loadQueue();
+  }else{
+    renderDomainReport();
+  }
+}
+
+function getDomainReportRows(){
+  const month=document.getElementById("domainReportMonth")?.value||getCurrentDomainReportMonth();
+  const q=(document.getElementById("domainReportSearch")?.value||"").trim().toLowerCase();
+  const sort=document.getElementById("domainReportSort")?.value||"notified_desc";
+
+  let rows=queueRows.filter(r=>r.domain_notified && isSameMonthValue(r.domain_notified_at, month));
+
+  if(q){
+    rows=rows.filter(r=>[
+      r.source_id,
+      r.project,
+      r.am,
+      r.domain_url,
+      r.package_name,
+      r.queue_status,
+      r.assigned_person,
+      r.assigned_month
+    ].join(" ").toLowerCase().includes(q));
+  }
+
+  rows.sort((a,b)=>{
+    if(sort==="notified_asc")return new Date(a.domain_notified_at||0)-new Date(b.domain_notified_at||0);
+    if(sort==="source_row_asc")return sheetOrderValue(a)-sheetOrderValue(b);
+    if(sort==="project_asc")return String(a.project||"").localeCompare(String(b.project||""));
+    if(sort==="am_asc")return String(a.am||"").localeCompare(String(b.am||""));
+    if(sort==="domain_asc")return String(a.domain_url||"").localeCompare(String(b.domain_url||""));
+    if(sort==="unassigned_first"){
+      const aa=isQueueAssigned(a);
+      const ba=isQueueAssigned(b);
+      if(aa!==ba)return aa?1:-1;
+      return new Date(b.domain_notified_at||0)-new Date(a.domain_notified_at||0);
+    }
+    return new Date(b.domain_notified_at||0)-new Date(a.domain_notified_at||0);
+  });
+
+  return rows;
+}
+
+function renderDomainReport(){
+  if(!document.getElementById("domainReportBody"))return;
+
+  const rows=getDomainReportRows();
+  const month=document.getElementById("domainReportMonth")?.value||getCurrentDomainReportMonth();
+  const MAX_RENDER_ROWS=500;
+  const visibleRows=rows.slice(0,MAX_RENDER_ROWS);
+  const unassignedCount=rows.filter(r=>!isQueueAssigned(r)).length;
+  const realDomainCount=rows.filter(r=>String(r.domain_url||"").trim()).length;
+
+  if(document.getElementById("domainReportMonthCount"))domainReportMonthCount.textContent=rows.length;
+  if(document.getElementById("domainReportUnassignedCount"))domainReportUnassignedCount.textContent=unassignedCount;
+
+  if(document.getElementById("domainReportSummary")){
+    const more=rows.length>visibleRows.length?` • Đang hiển thị ${visibleRows.length}/${rows.length}, dùng Search để lọc thêm`:"";
+    domainReportSummary.textContent=`Tháng ${month}: ${rows.length} project đã báo domain • ${realDomainCount} domain thật • ${unassignedCount} chưa assign${more}`;
+  }
+
+  domainReportBody.innerHTML=visibleRows.map(r=>{
+    const status=r.queue_status||"NEW";
+    const assigned=isQueueAssigned(r);
+    const statusCls=status==="ASSIGNED"?"assigned":status==="PENDING_INFO"?"pending":status==="SKIPPED"?"urgent":"new";
+    const domain=String(r.domain_url||"").trim();
+
+    return `<tr class="${assigned?"queue-row-assigned":"queue-row-current"}">
+      <td><b>${esc(r.source_id||"")}</b></td>
+      <td><b>${esc(r.project||"")}</b></td>
+      <td>${esc(r.am||"")}</td>
+      <td>${domain?`<span class="queue-domain-real">${esc(domain)}</span>`:`<span class="muted">-</span>`}</td>
+      <td><span class="badge assigned">Đã báo</span><br><span class="muted">${formatDomainNotifyTime(r.domain_notified_at)}</span></td>
+      <td><span class="badge">${esc(r.package_name||pkgFromProject(r.project||r.source_id))}</span></td>
+      <td><span class="badge ${statusCls}">${esc(status)}</span></td>
+      <td>${esc(r.assigned_month||"")}</td>
+      <td>${esc(r.assigned_person||"-")}</td>
+      <td>
+        <button class="ghost" onclick='updateDomainNotifyStatus(${JSON.stringify(r.source_id)},false)'>Chưa báo</button>
+        ${!assigned?`<button class="primary" onclick='openAssignFromQueue(${JSON.stringify(r.source_id)})'>Assign</button>`:""}
+      </td>
+    </tr>`;
+  }).join("");
+
+  updateQueueMenuCounts();
+}
 
 async function loadSheetAllProjectsJsonp(){
   if(!settings.sheetApi){
@@ -2159,8 +2392,8 @@ function openQueueContextMenu(event,sourceId){
   menu.style.display="block";
 
   const pad=8;
-  const menuW=240;
-  const menuH=140;
+  const menuW=270;
+  const menuH=230;
 
   let x=event.clientX;
   let y=event.clientY;
@@ -2191,6 +2424,80 @@ async function contextAddToCurrentQueue(){
   }
 
   await addQueueRowToCurrent(contextQueueSourceId);
+}
+
+async function updateDomainNotifyStatus(sourceId, notified){
+  if(!requireDb())return;
+
+  const row=queueRows.find(r=>r.source_id===sourceId);
+
+  if(!row){
+    toast("Không tìm thấy project", "#b71c1c");
+    return;
+  }
+
+  const nowIso=new Date().toISOString();
+
+  const payload={
+    domain_notified:!!notified,
+    domain_notified_at:notified?nowIso:null,
+    updated_at:nowIso
+  };
+
+  // Nếu đánh dấu đã báo domain thủ công mà project chưa assign, vẫn giữ trong Tiệm mới đủ info
+  // để chờ assign. Không chuyển qua Đã assign.
+  if(notified && !isQueueAssigned(row)){
+    payload.queue_status="NEW";
+    payload.is_current=true;
+    payload.force_current=true;
+  }
+
+  const {error}=await supabaseClient
+    .from("task_queue")
+    .update(payload)
+    .eq("source_id",sourceId);
+
+  if(error){
+    toast("Lỗi cập nhật báo domain: "+error.message, "#b71c1c");
+    console.error(error);
+    return;
+  }
+
+  await logAction(
+    notified?"manual_domain_mark_notified":"manual_domain_mark_unnotified",
+    null,
+    sourceId,
+    row.project||sourceId,
+    "",
+    notified?"Right-click mark domain notified":"Right-click mark domain unnotified",
+    row.am||""
+  );
+
+  toast(notified?"Đã đánh dấu ĐÃ BÁO domain":"Đã đánh dấu CHƯA BÁO domain", notified?"#2e7d32":"#8a6d00");
+
+  await loadQueue();
+}
+
+async function contextMarkDomainNotified(){
+  hideQueueContextMenu();
+
+  if(!contextQueueSourceId){
+    toast("Không tìm thấy project", "#b71c1c");
+    return;
+  }
+
+  await updateDomainNotifyStatus(contextQueueSourceId, true);
+}
+
+async function contextMarkDomainUnnotified(){
+  hideQueueContextMenu();
+
+  if(!contextQueueSourceId){
+    toast("Không tìm thấy project", "#b71c1c");
+    return;
+  }
+
+  await updateDomainNotifyStatus(contextQueueSourceId, false);
 }
 
 async function addQueueRowToCurrent(sourceId){
