@@ -862,7 +862,7 @@ td .badge.urgent{margin-top:4px}
       <div class="top">
         <div>
           <h2>🌐 Quản lí domain đã báo</h2>
-          <div class="sub">Theo dõi các project đã báo domain, lọc theo tháng và sort nhanh.</div>
+          <div class="sub">Theo dõi project đã báo domain khớp Calendar/tasks thật theo tháng.</div>
         </div>
         <div class="tools">
           <button onclick="loadDomainReport()">Reload</button>
@@ -873,12 +873,12 @@ td .badge.urgent{margin-top:4px}
         <div class="kpi-compact">
           <div class="label">Domain đã báo trong tháng</div>
           <div class="value" id="domainReportMonthCount">0</div>
-          <div class="hint">Tính theo thời gian báo domain</div>
+          <div class="hint">Khớp Calendar/tasks thật của tháng</div>
         </div>
         <div class="kpi-compact">
           <div class="label">Đã báo nhưng chưa assign</div>
           <div class="value" id="domainReportUnassignedCount">0</div>
-          <div class="hint">Vẫn còn trong Tiệm mới đủ info</div>
+          <div class="hint">Trong danh sách đã lọc theo Calendar tháng</div>
         </div>
       </div>
 
@@ -1228,7 +1228,18 @@ function updateQueueMenuCounts(){
     pending:queueRows.filter(r=>r.queue_status==="PENDING_INFO").length,
     skipped:queueRows.filter(r=>r.queue_status==="SKIPPED").length,
     all:queueRows.length,
-    domainReported:queueRows.filter(r=>r.domain_notified && isSameMonthValue(r.domain_notified_at, getCurrentDomainReportMonth())).length
+    domainReported:(()=>{
+      const m=getCurrentDomainReportMonth();
+      const c=assignedMonthCalendarCache.month===m?assignedMonthCalendarCache:null;
+      if(c&&c.keys){
+        return queueRows.filter(r=>
+          r.domain_notified &&
+          isSameMonthValue(r.domain_notified_at,m) &&
+          rowHasCalendarTaskInMonth(r,c)
+        ).length;
+      }
+      return 0;
+    })()
   };
   if(document.getElementById("navCountCurrent"))navCountCurrent.textContent=counts.current;
   if(document.getElementById("navCountNew"))navCountNew.textContent=counts.new;
@@ -1913,9 +1924,12 @@ async function loadDomainReport(){
 
   if(!queueRows.length){
     await loadQueue();
-  }else{
-    renderDomainReport();
   }
+
+  // Domain report theo tháng phải match Calendar/tasks thật của tháng đang chọn.
+  // Không chỉ đếm task_queue.domain_notified_at vì có thể đã đánh dấu nhầm hàng loạt từ dữ liệu stale.
+  await loadAssignedMonthCalendarCache(domainReportMonth.value);
+  renderDomainReport();
 }
 
 function getDomainReportRows(){
@@ -1923,7 +1937,29 @@ function getDomainReportRows(){
   const q=(document.getElementById("domainReportSearch")?.value||"").trim().toLowerCase();
   const sort=document.getElementById("domainReportSort")?.value||"notified_desc";
 
-  let rows=queueRows.filter(r=>r.domain_notified && isSameMonthValue(r.domain_notified_at, month));
+  const cache=assignedMonthCalendarCache.month===month?assignedMonthCalendarCache:null;
+
+  if(!cache||cache.loading||!cache.keys){
+    loadAssignedMonthCalendarCache(month).then(()=>{
+      const page=document.getElementById("page-domain_report");
+      if(page&&!page.classList.contains("hidden")&&(document.getElementById("domainReportMonth")?.value||getCurrentDomainReportMonth())===month){
+        renderDomainReport();
+      }
+    });
+
+    return {
+      rows:[],
+      loading:true,
+      error:cache?.error||null,
+      month
+    };
+  }
+
+  let rows=queueRows.filter(r=>
+    r.domain_notified &&
+    isSameMonthValue(r.domain_notified_at,month) &&
+    rowHasCalendarTaskInMonth(r,cache)
+  );
 
   if(q){
     rows=rows.filter(r=>[
@@ -1953,25 +1989,42 @@ function getDomainReportRows(){
     return new Date(b.domain_notified_at||0)-new Date(a.domain_notified_at||0);
   });
 
-  return rows;
+  return {
+    rows,
+    loading:false,
+    error:cache.error||null,
+    month
+  };
 }
 
 function renderDomainReport(){
   if(!document.getElementById("domainReportBody"))return;
 
-  const rows=getDomainReportRows();
-  const month=document.getElementById("domainReportMonth")?.value||getCurrentDomainReportMonth();
+  const report=getDomainReportRows();
+  const rows=report.rows||[];
+  const month=report.month||document.getElementById("domainReportMonth")?.value||getCurrentDomainReportMonth();
   const MAX_RENDER_ROWS=500;
   const visibleRows=rows.slice(0,MAX_RENDER_ROWS);
   const unassignedCount=rows.filter(r=>!isQueueAssigned(r)).length;
   const realDomainCount=rows.filter(r=>String(r.domain_url||"").trim()).length;
 
-  if(document.getElementById("domainReportMonthCount"))domainReportMonthCount.textContent=rows.length;
-  if(document.getElementById("domainReportUnassignedCount"))domainReportUnassignedCount.textContent=unassignedCount;
+  if(document.getElementById("domainReportMonthCount"))domainReportMonthCount.textContent=report.loading?"...":rows.length;
+  if(document.getElementById("domainReportUnassignedCount"))domainReportUnassignedCount.textContent=report.loading?"...":unassignedCount;
+  if(document.getElementById("navCountDomainReported"))navCountDomainReported.textContent=report.loading?"...":rows.length;
 
   if(document.getElementById("domainReportSummary")){
-    const more=rows.length>visibleRows.length?` • Đang hiển thị ${visibleRows.length}/${rows.length}, dùng Search để lọc thêm`:"";
-    domainReportSummary.textContent=`Tháng ${month}: ${rows.length} project đã báo domain • ${realDomainCount} domain thật • ${unassignedCount} chưa assign${more}`;
+    if(report.loading){
+      domainReportSummary.textContent=`Đang tải Calendar/tasks thật tháng ${month} để lọc domain đã báo...`;
+    }else{
+      const more=rows.length>visibleRows.length?` • Đang hiển thị ${visibleRows.length}/${rows.length}, dùng Search để lọc thêm`:"";
+      const err=report.error?" • Có lỗi khi tải Calendar/tasks":"";
+      domainReportSummary.textContent=`Tháng ${month}: ${rows.length} project đã báo domain khớp Calendar/tasks thật • ${realDomainCount} domain thật • ${unassignedCount} chưa assign${more}${err}`;
+    }
+  }
+
+  if(report.loading){
+    domainReportBody.innerHTML=`<tr><td colspan="11" class="muted">Đang tải dữ liệu Calendar/tasks thật của tháng ${esc(month)}...</td></tr>`;
+    return;
   }
 
   domainReportBody.innerHTML=visibleRows.map(r=>{
@@ -2000,6 +2053,7 @@ function renderDomainReport(){
 
   updateQueueMenuCounts();
 }
+
 
 async function loadSheetAllProjectsJsonp(){
   if(!settings.sheetApi){
