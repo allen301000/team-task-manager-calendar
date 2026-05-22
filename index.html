@@ -766,6 +766,8 @@ td .badge.urgent{margin-top:4px}
             <input id="queueSearch" class="queue-search-input" placeholder="Tìm project / AM / source id..." oninput="renderQueue()">
           </div>
           <div class="queue-toolbar-right">
+            <button class="green" onclick="bulkMarkSelectedDomainNotified()">✅ Đánh dấu đã báo</button>
+            <button class="warn" onclick="bulkMarkSelectedDomainUnnotified()">↩️ Đánh dấu chưa báo</button>
             <button class="ghost" onclick="queueSearch.value='';queuePackageFilter.value='';queueAssignMonthFilter.value='';renderQueue()">Clear filter</button>
           </div>
         </div>
@@ -904,6 +906,10 @@ td .badge.urgent{margin-top:4px}
             <input id="domainReportSearch" class="queue-search-input" placeholder="Tìm project / AM / domain / source id..." oninput="renderDomainReport()">
           </div>
           <div class="queue-toolbar-right">
+            <button class="warn" onclick="bulkMarkDomainReportUnnotified()">↩️ Đánh dấu chưa báo</button>
+            <button class="green" onclick="bulkMarkDomainReportNotified()">✅ Đánh dấu đã báo</button>
+            <button class="ghost" onclick="toggleDomainReportCheckAll(true)">Chọn tất cả</button>
+            <button class="ghost" onclick="toggleDomainReportCheckAll(false)">Bỏ chọn</button>
             <button class="ghost" onclick="domainReportSearch.value='';renderDomainReport()">Clear search</button>
           </div>
         </div>
@@ -912,6 +918,7 @@ td .badge.urgent{margin-top:4px}
           <table>
             <thead>
               <tr>
+                <th><input type="checkbox" id="domainReportCheckAll" onchange="toggleDomainReportCheckAll(this.checked)"></th>
                 <th>Source ID</th>
                 <th>Project</th>
                 <th>AM</th>
@@ -1851,6 +1858,7 @@ function renderDomainReport(){
     const domain=String(r.domain_url||"").trim();
 
     return `<tr class="${assigned?"queue-row-assigned":"queue-row-current"}">
+      <td><input type="checkbox" class="domain-report-check" value="${esc(r.source_id||"")}"></td>
       <td><b>${esc(r.source_id||"")}</b></td>
       <td><b>${esc(r.project||"")}</b></td>
       <td>${esc(r.am||"")}</td>
@@ -2469,6 +2477,140 @@ async function contextAddToCurrentQueue(){
   }
 
   await addQueueRowToCurrent(contextQueueSourceId);
+}
+
+
+function getSelectedQueueDomainIds(){
+  return [...document.querySelectorAll(".queue-domain-check:checked")]
+    .map(cb=>cb.value)
+    .filter(Boolean);
+}
+
+function getSelectedDomainReportIds(){
+  return [...document.querySelectorAll(".domain-report-check:checked")]
+    .map(cb=>cb.value)
+    .filter(Boolean);
+}
+
+function toggleDomainReportCheckAll(checked){
+  const boxes=[...document.querySelectorAll(".domain-report-check")];
+  boxes.forEach(cb=>cb.checked=checked);
+  if(boxes.length>=300){
+    toast(`Đã ${checked?"chọn":"bỏ chọn"} ${boxes.length} dòng domain đang hiển thị. Dùng Search/lọc tháng để thao tác chính xác hơn.`, "#8a6d00");
+  }
+}
+
+async function bulkUpdateDomainNotifyStatusByIds(sourceIds, notified, options={}){
+  if(!requireDb())return;
+
+  const ids=[...new Set((sourceIds||[]).filter(Boolean))];
+
+  if(!ids.length){
+    toast("Chưa chọn project nào", "#8a6d00");
+    return;
+  }
+
+  const selectedRows=queueRows.filter(r=>ids.includes(r.source_id));
+
+  if(!selectedRows.length){
+    toast("Không tìm thấy project đã chọn trong queue", "#b71c1c");
+    return;
+  }
+
+  const actionText=notified?"ĐÁNH DẤU ĐÃ BÁO DOMAIN":"ĐÁNH DẤU CHƯA BÁO DOMAIN";
+  const ok=options.skipConfirm===true || confirm(`${actionText} cho ${selectedRows.length} project đã chọn?\n\nThao tác này chỉ cập nhật trạng thái báo domain, không gửi Telegram và không đổi assignee/calendar.`);
+
+  if(!ok)return;
+
+  const nowIso=new Date().toISOString();
+  const basePayload={
+    domain_notified:!!notified,
+    domain_notified_at:notified?nowIso:null,
+    domain_notified_by:notified?"manual_bulk":null,
+    updated_at:nowIso
+  };
+
+  let changed=0;
+
+  // Chia nhỏ để tránh URL/query quá dài và tránh treo browser.
+  const CHUNK=100;
+
+  for(let i=0;i<ids.length;i+=CHUNK){
+    const chunkIds=ids.slice(i,i+CHUNK);
+    const chunkRows=selectedRows.filter(r=>chunkIds.includes(r.source_id));
+    const unassignedIds=chunkRows.filter(r=>!isQueueAssigned(r)).map(r=>r.source_id);
+    const assignedIds=chunkRows.filter(r=>isQueueAssigned(r)).map(r=>r.source_id);
+
+    if(notified && unassignedIds.length){
+      const {error}=await supabaseClient
+        .from("task_queue")
+        .update({
+          ...basePayload,
+          queue_status:"NEW",
+          is_current:true,
+          force_current:true
+        })
+        .in("source_id",unassignedIds);
+
+      if(error)throw error;
+      changed+=unassignedIds.length;
+    }
+
+    const normalIds=notified?assignedIds:chunkIds;
+
+    if(normalIds.length){
+      const {error}=await supabaseClient
+        .from("task_queue")
+        .update(basePayload)
+        .in("source_id",normalIds);
+
+      if(error)throw error;
+      changed+=normalIds.length;
+    }
+
+    await new Promise(resolve=>setTimeout(resolve,0));
+  }
+
+  try{
+    await logAction(
+      notified?"manual_domain_bulk_mark_notified":"manual_domain_bulk_mark_unnotified",
+      null,
+      ids.join(","),
+      `${changed} projects`,
+      "",
+      notified?"Bulk mark domain notified":"Bulk mark domain unnotified",
+      ""
+    );
+  }catch(e){
+    console.warn("Bulk domain audit log failed", e);
+  }
+
+  toast(notified?`Đã đánh dấu ĐÃ BÁO domain cho ${changed} project`:`Đã đánh dấu CHƯA BÁO domain cho ${changed} project`, notified?"#2e7d32":"#8a6d00");
+
+  document.querySelectorAll(".queue-domain-check,.domain-report-check").forEach(cb=>cb.checked=false);
+  if(document.getElementById("queueCheckAll"))queueCheckAll.checked=false;
+  if(document.getElementById("domainReportCheckAll"))domainReportCheckAll.checked=false;
+
+  await loadQueue();
+  if(!document.getElementById("page-domain_report")?.classList.contains("hidden")){
+    renderDomainReport();
+  }
+}
+
+async function bulkMarkSelectedDomainNotified(){
+  await bulkUpdateDomainNotifyStatusByIds(getSelectedQueueDomainIds(), true);
+}
+
+async function bulkMarkSelectedDomainUnnotified(){
+  await bulkUpdateDomainNotifyStatusByIds(getSelectedQueueDomainIds(), false);
+}
+
+async function bulkMarkDomainReportNotified(){
+  await bulkUpdateDomainNotifyStatusByIds(getSelectedDomainReportIds(), true);
+}
+
+async function bulkMarkDomainReportUnnotified(){
+  await bulkUpdateDomainNotifyStatusByIds(getSelectedDomainReportIds(), false);
 }
 
 async function updateDomainNotifyStatus(sourceId, notified){
