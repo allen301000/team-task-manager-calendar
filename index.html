@@ -1024,6 +1024,7 @@ td .badge.urgent{margin-top:4px}
 <div id="toast" class="toast"></div>
 
 <script>
+// Fixed full version: syntax-safe queue rendering, safe batch assign flow, and safer toast helper.
 const DEFAULTS={editCode:"TEAM2026",supabaseUrl:"",supabaseKey:"",sheetApi:"",telegramWebhook:"",domainGroupChatId:"",domainMention:"@lee_web"};
 const TYPES=["Design + QR","Design","Menu + QR","Menu","QR"];
 const PACKAGE_POINTS={"Gói S":1,"Gói P":1,"Gói G":1.2,"Gói F":1.2,"Gói Menu + QR":1.5,"Gói Custom":2};
@@ -1046,7 +1047,14 @@ let queueRenderToken=0;
 let canEdit=localStorage.getItem("tm_canEdit")==="1";
 
 function esc(s){return String(s??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]))}
-function toast(msg,color="#333"){toastEl=document.getElementById("toast");toastEl.textContent=msg;toastEl.style.background=color;toastEl.classList.add("show");setTimeout(()=>toastEl.classList.remove("show"),1800)}
+function toast(msg,color="#333"){
+  const toastEl=document.getElementById("toast");
+  if(!toastEl){console.log("Toast:",msg);return;}
+  toastEl.textContent=msg;
+  toastEl.style.background=color;
+  toastEl.classList.add("show");
+  setTimeout(()=>toastEl.classList.remove("show"),1800);
+}
 function logDebug(...args){console.log(...args);const b=document.getElementById("debugBox");if(!b)return;const msg=args.map(x=>typeof x==="string"?x:JSON.stringify(x,null,2)).join(" ");b.textContent+="\n"+msg;b.scrollTop=b.scrollHeight}
 function clearDebug(){const b=document.getElementById("debugBox");if(b)b.textContent="Ready."}
 function formatDate(y,m,d){return `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`}
