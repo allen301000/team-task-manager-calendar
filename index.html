@@ -1159,6 +1159,18 @@ function pkgFromProject(project){
   return map[c]||"Gói Custom";
 }
 
+
+function pickAssignTypeFromProject(project){
+  const text=String(project||"").toUpperCase();
+  const mid6=text.substring(5,8); // MID(A,6,3) trong Google Sheet
+  const after9=text.substring(8); // MID(A,9,100)
+
+  if(/00M|0CM|0EM/.test(mid6))return "Menu + QR";
+  if(/F00|F0M/.test(mid6))return "Custom + QR";
+  if(/PROX3|PROX4|PROC3|PROC4/.test(after9))return "Design + QR";
+  return "Design";
+}
+
 function pkgFromId(id){
   return pkgFromProject(id);
 }
@@ -3876,7 +3888,8 @@ async function bulkAssignSelected(){
 
   const ok=confirm(
     `Assign batch ${selectedRows.length} project bằng Database RPC?\n\n`+
-    `Cách mới này xử lý trực tiếp trong Supabase nên trình duyệt không bị Page Unresponsive.\n`+
+    `Bước 1: Supabase assign nhanh, không treo trang.\n`+
+    `Bước 2: Web tự gửi Telegram sau khi assign thành công, chia nhỏ để không freeze.\n`+
     `Auto assign chỉ tính member Active = true, role WEB/BOTH, theo Sort ID.\n`+
     (skippedByUi.length?`\nĐã bỏ qua ${skippedByUi.length} project đã assign ở UI.`:"")
   );
@@ -3894,7 +3907,7 @@ async function bulkAssignSelected(){
     }
 
     clearDebug();
-    toast("Đang gửi job assign batch vào Supabase RPC...", "#f05a28");
+    toast("Đang assign trong Supabase RPC...", "#f05a28");
     logDebug("Assign batch RPC source_ids", selectedRows.map(r=>r.source_id));
 
     const {data,error}=await supabaseClient.rpc("assign_batch_queue_v3",{
@@ -3906,31 +3919,53 @@ async function bulkAssignSelected(){
     }
 
     const rows=data||[];
-    const assigned=rows.filter(r=>!r.skipped_reason).length;
-    const restored=rows.filter(r=>r.skipped_reason==="already_exists_in_calendar_restored").length;
-    const skipped=rows.filter(r=>r.skipped_reason&&r.skipped_reason!=="already_exists_in_calendar_restored").length;
+    const assignedRows=rows.filter(r=>!r.skipped_reason);
+    const restoredRows=rows.filter(r=>r.skipped_reason==="already_exists_in_calendar_restored");
+    const skippedRows=rows.filter(r=>r.skipped_reason&&r.skipped_reason!=="already_exists_in_calendar_restored");
 
     console.table(rows);
     logDebug("Assign batch RPC result",{
       total_returned:rows.length,
-      assigned,
-      restored,
-      skipped,
+      assigned:assignedRows.length,
+      restored:restoredRows.length,
+      skipped:skippedRows.length,
       skipped_rows:rows.filter(r=>r.skipped_reason)
     });
 
+    // Gửi Telegram SAU khi RPC assign xong. Chỉ gửi cho task mới được assign,
+    // không gửi cho dòng restored để tránh spam lại task cũ đã có trong Calendar.
+    let notifyResult={sent:0,missing:0,failed:0,skipped:0};
+    if(assignedRows.length){
+      if(assignBtn)assignBtn.textContent="Đang gửi Telegram...";
+      toast(`Đã assign ${assignedRows.length} task. Đang gửi Telegram...`, "#f05a28");
+      notifyResult=await sendBulkAssignNotifications(assignedRows, selectedRows);
+      logDebug("Assign batch Telegram result", notifyResult);
+    }
+
+    if(restoredRows.length){
+      logDebug("Không gửi Telegram cho task restored để tránh gửi trùng", restoredRows.map(r=>({
+        source_id:r.source_id,
+        project:r.project,
+        person:r.person,
+        task_date:r.task_date
+      })));
+    }
+
     document.querySelectorAll(".queue-domain-check").forEach(cb=>cb.checked=false);
 
-    const lastAssigned=rows.slice().reverse().find(r=>r.task_date&&!r.skipped_reason);
+    const lastAssigned=assignedRows.slice().reverse().find(r=>r.task_date);
     if(lastAssigned?.task_date){
       const d=new Date(String(lastAssigned.task_date)+"T00:00:00");
       if(!isNaN(d.getTime()))current=d;
     }
 
     const sec=Math.round((Date.now()-startedAt)/1000);
-    toast(`Assign RPC xong: ${assigned} mới, ${restored} đã có Calendar, ${skipped} bỏ qua (${sec}s)`, "#2e7d32");
+    toast(
+      `Assign xong: ${assignedRows.length} mới, ${restoredRows.length} restore, ${skippedRows.length} bỏ qua. Telegram: ${notifyResult.sent} gửi, ${notifyResult.missing} thiếu ID (${sec}s)`,
+      "#2e7d32"
+    );
 
-    // Reload một lần duy nhất sau khi database xử lý xong.
+    // Reload một lần duy nhất sau khi assign + gửi thông báo xong.
     await loadQueue();
     showPage("calendar");
 
@@ -3940,8 +3975,8 @@ async function bulkAssignSelected(){
 
   }catch(e){
     console.error("Bulk assign RPC failed", e);
-    logDebug("ASSIGN RPC ERROR", e.message||e);
-    toast("Lỗi assign batch RPC: "+(e.message||e), "#b71c1c");
+    logDebug("ASSIGN RPC / TELEGRAM ERROR", e.message||e);
+    toast("Lỗi assign batch: "+(e.message||e), "#b71c1c");
   }finally{
     if(assignBtn){
       assignBtn.disabled=false;
@@ -3949,6 +3984,84 @@ async function bulkAssignSelected(){
     }
   }
 }
+
+async function sendBulkAssignNotifications(assignedRows, originalQueueRows=[]){
+  const result={sent:0,missing:0,failed:0,skipped:0};
+  const queueById=new Map((originalQueueRows||[]).map(r=>[String(r.source_id||""),r]));
+
+  if(!settings.telegramWebhook){
+    logDebug("⚠️ Chưa cấu hình Telegram webhook, assign đã xong nhưng chưa thể gửi thông báo",{
+      assigned_count:assignedRows.length
+    });
+    result.failed=assignedRows.length;
+    return result;
+  }
+
+  // Gửi tuần tự và nhường UI sau mỗi task để tránh Page Unresponsive.
+  for(let i=0;i<assignedRows.length;i++){
+    const item=assignedRows[i];
+    const sourceId=String(item.source_id||"");
+    const queueRow=queueById.get(sourceId)||{};
+    const project=item.project||queueRow.project||sourceId;
+    const person=item.person||"";
+    const taskDate=item.task_date||"";
+    const type=item.task_type||pickAssignTypeFromProject(project);
+    const amInfo=resolveAssignAm(item.am||queueRow.am||"None",{...queueRow,source_id:sourceId,project});
+    const am=amInfo.name;
+
+    const webMember=findMemberLooseByName(person,["WEB","BOTH"])||memberByName(person);
+    const amMember=amInfo.member||findMemberLooseByName(am,["AM","BOTH"]);
+
+    debugMissingTelegramForAssign({
+      source_id:sourceId,
+      project,
+      person,
+      webMember,
+      am,
+      amMember,
+      rawAm:amInfo.raw||item.am||queueRow.am||""
+    });
+
+    const hasWebChat=!!String(webMember?.telegram_chat_id||"").trim();
+    const hasAmChat=String(am||"").trim()==="None" || !!String(amMember?.telegram_chat_id||"").trim();
+    if(!hasWebChat || !hasAmChat)result.missing++;
+
+    const msg=`Project: ${project}\nType: ${type}\n\nMember: ${person}\nAM: ${am}\n📅 ${taskDate}`;
+
+    try{
+      await sendTelegram({
+        event:"new",
+        person,
+        person_chat_id:webMember?.telegram_chat_id||"",
+        am,
+        am_chat_id:amMember?.telegram_chat_id||"",
+        type,
+        message:msg
+      });
+
+      await logAction("assign",item.task_id||null,sourceId,project,person,`Assigned by RPC batch / AM ${am}`,am);
+      result.sent++;
+    }catch(err){
+      result.failed++;
+      console.error("Bulk assign Telegram failed",err,item);
+      logDebug("⚠️ Gửi Telegram assign batch lỗi",{
+        source_id:sourceId,
+        project,
+        person,
+        am,
+        error:err?.message||String(err)
+      });
+    }
+
+    if((i+1)%1===0){
+      toast(`Đang gửi Telegram ${i+1}/${assignedRows.length}...`, "#f05a28");
+      await yieldUi();
+    }
+  }
+
+  return result;
+}
+
 
 function openBulkAutoAssign(){
   bulkAssignSelected();
