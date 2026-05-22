@@ -737,7 +737,7 @@ td .badge.urgent{margin-top:4px}
         <div class="kpi-compact">
           <div class="label">Đã assign trong tháng</div>
           <div class="value" id="kpiMonthAssigned">0</div>
-          <div class="hint">Theo tháng đang chọn</div>
+          <div class="hint">Đếm theo Calendar/tasks thật</div>
         </div>
       </div>
 
@@ -1412,19 +1412,64 @@ function getQueueRowsByFilter(filterValue){
   return rows;
 }
 
+let assignedMonthKpiToken=0;
+
+function monthRangeFromLabel(month){
+  const safeMonth=month||`${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,"0")}`;
+  const start=`${safeMonth}-01`;
+  const d=new Date(start+"T00:00:00");
+  d.setMonth(d.getMonth()+1);
+  const end=d.toISOString().slice(0,10);
+  return {month:safeMonth,start,end};
+}
+
+async function countAssignedInCalendarMonth(month){
+  if(!supabaseClient)return 0;
+
+  const {start,end}=monthRangeFromLabel(month);
+
+  // KPI tháng phải lấy từ bảng tasks/Calendar, không lấy từ task_queue.
+  // task_queue có thể còn assigned_month cũ sau khi test assign rồi xóa task, nên dễ bị đếm dư.
+  const {count,error}=await supabaseClient
+    .from("tasks")
+    .select("id",{count:"exact",head:true})
+    .gte("task_date",start)
+    .lt("task_date",end)
+    .not("person","is",null);
+
+  if(error)throw error;
+
+  return count||0;
+}
+
 function renderQueueKpis(){
   const month=document.getElementById("queueAssignMonthFilter")?.value||`${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,"0")}`;
 
   const currentCount=queueRows.filter(r=>shouldShowInCurrentQueue(r)).length;
 
-  const monthAssigned=queueRows.filter(r=>{
-    const m=String(r.assigned_month||r.assigned_date||"").slice(0,7);
-    return m===month&&r.queue_status==="ASSIGNED";
-  }).length;
-
   if(document.getElementById("kpiCurrent"))kpiCurrent.textContent=currentCount;
-  if(document.getElementById("kpiMonthAssigned"))kpiMonthAssigned.textContent=monthAssigned;
   if(document.getElementById("kpiToday"))kpiToday.textContent=Object.values(cache).flat().filter(t=>t.task_date===todayStr()).length;
+
+  // Hiển thị số đã assign trong tháng theo Calendar thật.
+  // Không dùng task_queue.assigned_month vì field này có thể bị stale khi xóa task test trong Calendar.
+  const token=++assignedMonthKpiToken;
+  if(document.getElementById("kpiMonthAssigned"))kpiMonthAssigned.textContent="...";
+
+  countAssignedInCalendarMonth(month)
+    .then(count=>{
+      if(token!==assignedMonthKpiToken)return;
+      if(document.getElementById("kpiMonthAssigned"))kpiMonthAssigned.textContent=count;
+    })
+    .catch(e=>{
+      console.warn("Count assigned month from Calendar failed",e);
+      if(token!==assignedMonthKpiToken)return;
+      // Fallback cũ nếu query tasks lỗi, nhưng log rõ để không hiểu nhầm.
+      const fallback=queueRows.filter(r=>{
+        const m=String(r.assigned_month||r.assigned_date||"").slice(0,7);
+        return m===month&&r.queue_status==="ASSIGNED";
+      }).length;
+      if(document.getElementById("kpiMonthAssigned"))kpiMonthAssigned.textContent=fallback;
+    });
 
   updateQueueMenuCounts();
 }
