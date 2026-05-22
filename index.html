@@ -1505,6 +1505,42 @@ function rowHasCalendarTaskInMonth(row,cache){
   return queueAssignKeys(row).some(k=>cache.keys.has(k));
 }
 
+
+function buildAssignedMonthRowsFromCalendarTasks(tasks,queueList){
+  const maps=buildQueueMatchMaps(queueList||[]);
+  const rows=[];
+  const seen=new Set();
+
+  (tasks||[]).filter(t=>t&&t.text&&t.person).forEach((task,idx)=>{
+    const matched=findQueueRowForTask(task,maps);
+    const project=String(matched?.project||task.text||"").trim();
+    const sourceId=String(matched?.source_id||task.source_id||normalizeProjectId(project)||`CAL-${idx+1}`).trim();
+    const taskKey=[sourceId,project,task.person||"",task.task_date||""].join("||");
+
+    // Một task Calendar chỉ tạo một dòng hiển thị. Không filter ngược từ task_queue nữa,
+    // vì task_queue có thể còn assigned_month stale hoặc duplicate sau khi test/xóa Calendar.
+    if(seen.has(taskKey))return;
+    seen.add(taskKey);
+
+    rows.push({
+      ...(matched||{}),
+      source_id:sourceId,
+      project,
+      am:matched?.am||task.am||"",
+      package_name:matched?.package_name||task.package_name||pkgFromProject(project),
+      note:matched?.note||task.note||"",
+      queue_status:"ASSIGNED",
+      assigned_person:task.person||matched?.assigned_person||"",
+      assigned_date:task.task_date||matched?.assigned_date||"",
+      assigned_month:String(task.task_date||matched?.assigned_month||"").slice(0,7),
+      // Giữ domain/template/layout từ queue nếu có, nhưng trạng thái assign lấy theo Calendar thật.
+      _from_calendar_month:true
+    });
+  });
+
+  return rows;
+}
+
 function renderQueueKpis(){
   const month=document.getElementById("queueAssignMonthFilter")?.value||`${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,"0")}`;
 
@@ -1724,12 +1760,12 @@ function renderQueue(){
   if(st==="CURRENT"){
     rows=rows.filter(r=>shouldShowInCurrentQueue(r));
   }else if(st==="ASSIGNED"&&assignMonth){
-    // Khi xem Đã assign theo tháng, phải lọc theo Calendar/tasks thật.
-    // Không dùng task_queue.assigned_month vì field này có thể còn sót sau khi xóa task test.
+    // Khi xem Đã assign theo tháng, danh sách phải lấy từ Calendar/tasks thật.
+    // Không filter ngược từ task_queue, vì task_queue có thể còn assigned_month stale sau khi test/xóa task.
     calendarMonthMode=true;
 
-    if(assignedMonthCalendarCache.month===assignMonth&&assignedMonthCalendarCache.keys){
-      rows=rows.filter(r=>rowHasCalendarTaskInMonth(r,assignedMonthCalendarCache));
+    if(assignedMonthCalendarCache.month===assignMonth&&assignedMonthCalendarCache.tasks){
+      rows=buildAssignedMonthRowsFromCalendarTasks(assignedMonthCalendarCache.tasks,queueRows);
     }else{
       calendarMonthLoading=true;
       rows=[];
@@ -1784,9 +1820,8 @@ function renderQueue(){
     if(calendarMonthLoading){
       queueResultSummary.textContent=`${label}: đang tải dữ liệu Calendar/tasks tháng ${assignMonth}.`;
     }else if(calendarMonthMode){
-      const taskCount=assignedMonthCalendarCache.month===assignMonth&&assignedMonthCalendarCache.tasks?assignedMonthCalendarCache.tasks.length:rows.length;
       const errText=calendarMonthError?` • Lỗi tải Calendar, đang hiển thị 0`:"";
-      queueResultSummary.textContent=`${baseSummary} • Đếm theo Calendar/tasks thật: ${taskCount}${errText}`;
+      queueResultSummary.textContent=`${baseSummary} • Đang hiển thị theo Calendar/tasks thật${errText}`;
     }else{
       queueResultSummary.textContent=baseSummary;
     }
