@@ -1231,12 +1231,8 @@ function updateQueueMenuCounts(){
     domainReported:(()=>{
       const m=getCurrentDomainReportMonth();
       const c=assignedMonthCalendarCache.month===m?assignedMonthCalendarCache:null;
-      if(c&&c.keys){
-        return queueRows.filter(r=>
-          r.domain_notified &&
-          isSameMonthValue(r.domain_notified_at,m) &&
-          rowHasCalendarTaskInMonth(r,c)
-        ).length;
+      if(c&&c.tasks){
+        return buildDomainReportRowsFromCalendarTasks(c.tasks,queueRows,m).length;
       }
       return 0;
     })()
@@ -1546,6 +1542,47 @@ function buildAssignedMonthRowsFromCalendarTasks(tasks,queueList){
       assigned_month:String(task.task_date||matched?.assigned_month||"").slice(0,7),
       // Giữ domain/template/layout từ queue nếu có, nhưng trạng thái assign lấy theo Calendar thật.
       _from_calendar_month:true
+    });
+  });
+
+  return rows;
+}
+
+
+function buildDomainReportRowsFromCalendarTasks(tasks,queueList,month){
+  const maps=buildQueueMatchMaps(queueList||[]);
+  const rows=[];
+  const seen=new Set();
+
+  (tasks||[]).filter(t=>t&&t.text&&t.person).forEach((task,idx)=>{
+    const matched=findQueueRowForTask(task,maps);
+
+    // Domain report phải lấy theo Calendar/tasks thật trước, rồi mới map về task_queue.
+    // Không được filter ngược từ toàn bộ task_queue vì assigned_month/domain_notified_at có thể stale.
+    if(!matched)return;
+    if(!matched.domain_notified)return;
+    if(!isSameMonthValue(matched.domain_notified_at,month))return;
+
+    const project=String(matched.project||task.text||"").trim();
+    const sourceId=String(matched.source_id||task.source_id||normalizeProjectId(project)||`CAL-${idx+1}`).trim();
+    const rowKey=[sourceId,task.id||"",task.person||"",task.task_date||""].join("||");
+
+    if(seen.has(rowKey))return;
+    seen.add(rowKey);
+
+    rows.push({
+      ...matched,
+      source_id:sourceId,
+      project,
+      am:matched.am||task.am||"",
+      package_name:matched.package_name||task.package_name||pkgFromProject(project),
+      note:matched.note||task.note||"",
+      queue_status:"ASSIGNED",
+      assigned_person:task.person||matched.assigned_person||"",
+      assigned_date:task.task_date||matched.assigned_date||"",
+      assigned_month:String(task.task_date||matched.assigned_month||"").slice(0,7),
+      _from_calendar_month:true,
+      _domain_report_calendar:true
     });
   });
 
@@ -1939,7 +1976,7 @@ function getDomainReportRows(){
 
   const cache=assignedMonthCalendarCache.month===month?assignedMonthCalendarCache:null;
 
-  if(!cache||cache.loading||!cache.keys){
+  if(!cache||cache.loading||!cache.tasks){
     loadAssignedMonthCalendarCache(month).then(()=>{
       const page=document.getElementById("page-domain_report");
       if(page&&!page.classList.contains("hidden")&&(document.getElementById("domainReportMonth")?.value||getCurrentDomainReportMonth())===month){
@@ -1955,11 +1992,11 @@ function getDomainReportRows(){
     };
   }
 
-  let rows=queueRows.filter(r=>
-    r.domain_notified &&
-    isSameMonthValue(r.domain_notified_at,month) &&
-    rowHasCalendarTaskInMonth(r,cache)
-  );
+  // FIX IMPORTANT:
+  // Danh sách domain đã báo phải build từ Calendar/tasks thật của tháng trước,
+  // sau đó mới map về task_queue để lấy domain_notified.
+  // Như vậy nếu Calendar tháng có 116 task thì report không thể hiện 250 dòng stale.
+  let rows=buildDomainReportRowsFromCalendarTasks(cache.tasks||[],queueRows,month);
 
   if(q){
     rows=rows.filter(r=>[
