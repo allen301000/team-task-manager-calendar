@@ -1077,8 +1077,27 @@ function pointFor(pkg,pri="Normal"){let p=PACKAGE_POINTS[pkg]||1;if(pri==="Urgen
 function requireDb(){if(!supabaseClient){toast("Chưa cấu hình Supabase trong Setup","#b71c1c");return false}return true}
 function initClient(){if(settings.supabaseUrl&&settings.supabaseKey)supabaseClient=supabase.createClient(settings.supabaseUrl,settings.supabaseKey)}
 function webMembers(){
+  // Dùng cho dropdown/filter hiển thị người đang active.
+  // Task cũ của người inactive vẫn hiển thị trên Calendar khi xem All people vì dữ liệu task không bị xoá/ẩn.
   return members
     .filter(m=>m.active!==false&&(m.role==="WEB"||m.role==="BOTH"))
+    .sort((a,b)=>{
+      const ao=Number(a.sort_order??999);
+      const bo=Number(b.sort_order??999);
+      if(ao!==bo)return ao-bo;
+      return String(a.name||"").localeCompare(String(b.name||""));
+    });
+}
+
+function autoAssignMembers(){
+  // Chỉ dùng cho Auto Assign / Assign batch.
+  // Active = true mới được nhận task mới.
+  // Inactive vẫn giữ và hiển thị task cũ, nhưng không được tính vào vòng tự động.
+  return members
+    .filter(m=>
+      m.active === true &&
+      (m.role === "WEB" || m.role === "BOTH")
+    )
     .sort((a,b)=>{
       const ao=Number(a.sort_order??999);
       const bo=Number(b.sort_order??999);
@@ -2956,7 +2975,7 @@ async function sendRpcAssignNotifications(rows){
 }
 
 
-// Assign batch v3: xử lý bằng Supabase RPC, chỉ 1 request chính.
+// Assign batch v4: xử lý bằng Supabase RPC, team tự động = member Active + WEB/BOTH theo Sort ID.
 // Cách này tránh hoàn toàn việc browser phải loop delete/insert/update nhiều dòng nên không còn Page Unresponsive.
 async function bulkAssignSelected(){
   if(!requireDb())return;
@@ -3001,11 +3020,21 @@ async function bulkAssignSelected(){
   }
 
   const candidateIds=candidateRows.map(r=>r.source_id);
+  const autoTeam=autoAssignMembers();
+
+  if(!autoTeam.length){
+    toast("Không có WEB/BOTH member nào đang Active để auto assign", "#b71c1c");
+    logDebug("Auto assign team empty. Check Members / AM Active status.", members.map(m=>({name:m.name,role:m.role,active:m.active,sort_order:m.sort_order})));
+    return;
+  }
+
+  const autoTeamText=autoTeam.map(m=>m.name).join(" → ");
 
   const ok=confirm(
     `Assign batch ${candidateIds.length} project bằng Database RPC?\n\n`+
-    `Cách mới sẽ xử lý trực tiếp trong Supabase, không chạy vòng lặp nặng trên trình duyệt.\n\n`+
-    `Rule giữ nguyên: team Web theo Sort ID, ví dụ Tony → Alex → Lucas → Allen → Hayden → Leo. `+
+    `Cách mới xử lý trực tiếp trong Supabase, không chạy vòng lặp nặng trên trình duyệt.\n\n`+
+    `Team nhận task mới: ${autoTeamText}.\n`+
+    `Chỉ member Active + role WEB/BOTH mới được tính, theo Sort ID tăng dần. Inactive vẫn giữ task cũ nhưng không nhận task mới.\n`+
     `Hết vòng thì tự chuyển sang ngày tiếp theo.\n\n`+
     (skippedLocal.length?`Đã tự bỏ qua ${skippedLocal.length} project đã assign/status khác NEW.`:"")
   );
