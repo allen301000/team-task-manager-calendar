@@ -955,6 +955,7 @@ td .badge.urgent{margin-top:4px}
           <h3>Apps Script</h3>
           <label>Apps Script Web App URL để lấy task queue</label><input id="setSheetApi" placeholder="https://script.google.com/macros/s/.../exec"><br><br>
           <label>Telegram webhook URL</label><input id="setTelegram" placeholder="https://script.google.com/macros/s/.../exec"><br><br>
+          <label>Tracking Log webhook URL</label><input id="setTrackingWebhook" placeholder="Apps Script Web App URL để lưu log tracking vào Google Sheet"><br><br>
           <label>Domain Group Telegram Chat ID</label><input id="setDomainGroupChat" placeholder="-100xxxxxxxxxx"><br><br>
           <label>Mention trong group domain</label><input id="setDomainMention" placeholder="@lee_web"><br><br>
           <div class="note">Có thể dùng chung Apps Script URL nếu file GAS có cả doGet queue API và doPost Telegram. Domain Group Chat ID là group nhận thông báo tạo domain.</div>
@@ -1024,7 +1025,7 @@ td .badge.urgent{margin-top:4px}
 <div id="toast" class="toast"></div>
 
 <script>
-const DEFAULTS={editCode:"TEAM2026",supabaseUrl:"",supabaseKey:"",sheetApi:"",telegramWebhook:"",domainGroupChatId:"",domainMention:"@lee_web"};
+const DEFAULTS={editCode:"TEAM2026",supabaseUrl:"",supabaseKey:"",sheetApi:"",telegramWebhook:"",trackingWebhook:"",domainGroupChatId:"",domainMention:"@lee_web"};
 const TYPES=["Design + QR","Design","Menu + QR","Custom + QR","Design","Menu","QR"];
 const PACKAGE_POINTS={"Gói S":1,"Gói P":1,"Gói G":1.2,"Gói F":1.2,"Gói Menu + QR":1.5,"Gói Custom":2};
 const FALLBACK_MEMBERS=[
@@ -1400,8 +1401,8 @@ function openMemberModal(id=null){editingMember=id?members.find(m=>m.id===id):nu
 async function saveMember(){if(!requireDb())return;const payload={name:memberName.value.trim(),role:memberRole.value,telegram_chat_id:memberTelegram.value.trim()||null,max_per_day:memberMaxDay.value===""?null:Number(memberMaxDay.value),sort_order:memberSortOrder.value===""?999:Number(memberSortOrder.value),color:memberColor.value,active:memberActive.value==="true"};if(!payload.name){toast("Thiếu name","#b71c1c");return}let res;if(editingMember)res=await supabaseClient.from("members").update(payload).eq("id",editingMember.id);else res=await supabaseClient.from("members").insert(payload);if(res.error){toast(res.error.message,"#b71c1c");return}closeModal("memberModal");toast("Saved member","#2e7d32");await loadMembers();await logAction("member_save",null,payload.name,"",payload.name,"Saved member")}
 async function deleteMember(id){if(!requireDb())return;if(!confirm("Delete member/AM này?"))return;const {error}=await supabaseClient.from("members").delete().eq("id",id);if(error){toast(error.message,"#b71c1c");return}toast("Deleted","#b71c1c");await loadMembers()}
 
-function setupUi(){document.querySelectorAll(".nav button").forEach(b=>b.onclick=()=>{if(b.dataset.page==="queue")setQueueMenuFilter(b.dataset.queueFilter||"CURRENT");else showPage(b.dataset.page)});workloadDate.value=todayStr();setSupabaseUrl.value=settings.supabaseUrl||"";setSupabaseKey.value=settings.supabaseKey||"";setSheetApi.value=settings.sheetApi||"";setTelegram.value=settings.telegramWebhook||"";setDomainGroupChat.value=settings.domainGroupChatId||"";setDomainMention.value=settings.domainMention||"@lee_web";if(document.getElementById("queueCurrentFilterChip"))queueCurrentFilterChip.textContent=queueFilterLabel(queueStatusFilter?.value||"CURRENT");updateEditState()}
-function saveSettings(){settings.supabaseUrl=setSupabaseUrl.value.trim();settings.supabaseKey=setSupabaseKey.value.trim();settings.sheetApi=setSheetApi.value.trim();settings.telegramWebhook=setTelegram.value.trim();settings.domainGroupChatId=setDomainGroupChat.value.trim();settings.domainMention=setDomainMention.value.trim()||"@lee_web";localStorage.setItem("tm_settings",JSON.stringify(settings));initClient();toast("Đã lưu setup","#2e7d32");loadMembers()}
+function setupUi(){document.querySelectorAll(".nav button").forEach(b=>b.onclick=()=>{if(b.dataset.page==="queue")setQueueMenuFilter(b.dataset.queueFilter||"CURRENT");else showPage(b.dataset.page)});workloadDate.value=todayStr();setSupabaseUrl.value=settings.supabaseUrl||"";setSupabaseKey.value=settings.supabaseKey||"";setSheetApi.value=settings.sheetApi||"";setTelegram.value=settings.telegramWebhook||"";if(document.getElementById("setTrackingWebhook"))setTrackingWebhook.value=settings.trackingWebhook||"";setDomainGroupChat.value=settings.domainGroupChatId||"";setDomainMention.value=settings.domainMention||"@lee_web";if(document.getElementById("queueCurrentFilterChip"))queueCurrentFilterChip.textContent=queueFilterLabel(queueStatusFilter?.value||"CURRENT");updateEditState()}
+function saveSettings(){settings.supabaseUrl=setSupabaseUrl.value.trim();settings.supabaseKey=setSupabaseKey.value.trim();settings.sheetApi=setSheetApi.value.trim();settings.telegramWebhook=setTelegram.value.trim();settings.trackingWebhook=document.getElementById("setTrackingWebhook")?setTrackingWebhook.value.trim():"";settings.domainGroupChatId=setDomainGroupChat.value.trim();settings.domainMention=setDomainMention.value.trim()||"@lee_web";localStorage.setItem("tm_settings",JSON.stringify(settings));initClient();toast("Đã lưu setup","#2e7d32");loadMembers()}
 function unlockEdit(){if(editCode.value===settings.editCode){canEdit=true;localStorage.setItem("tm_canEdit","1");updateEditState();renderCalendarOnly();toast("Edit unlocked","#2e7d32")}else toast("Wrong code","#b71c1c")}
 function updateEditState(){editState.textContent=canEdit?"✅ Đang mở quyền edit":"🔒 Chỉ xem"}
 function showPage(page){
@@ -1429,8 +1430,83 @@ function showPage(page){
   if(page==="logs")loadAuditLogs();
 }
 
-async function sendTelegram(data){if(!settings.telegramWebhook)return;try{await fetch(settings.telegramWebhook,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(data)})}catch(e){console.error("Telegram error",e)}}
-async function logAction(action,taskId,sourceId,project,person,detail="",am=""){if(!supabaseClient)return;try{await supabaseClient.from("task_audit_logs").insert({action,task_id:taskId,source_id:sourceId,project,person,am,detail})}catch(e){console.warn("audit log failed",e)}}
+function buildTrackingPayload(action, payload={}){
+  const now=new Date();
+  const taskDate=payload.task_date||payload.taskDate||"";
+  return {
+    log_id:`TL-${now.toISOString().replace(/[-:.TZ]/g,"").slice(0,14)}-${Math.random().toString(36).slice(2,8).toUpperCase()}`,
+    timestamp:now.toISOString(),
+    date:now.toISOString().slice(0,10),
+    month:now.toISOString().slice(0,7),
+    action:action||payload.action||"info",
+    event:payload.event||"",
+    result:payload.result||"info",
+    source_id:payload.source_id||payload.sourceId||"",
+    project:payload.project||payload.text||payload.message_project||"",
+    am:payload.am||"",
+    am_chat_id:payload.am_chat_id||"",
+    assignee:payload.person||payload.assignee||"",
+    assignee_chat_id:payload.person_chat_id||payload.assignee_chat_id||"",
+    task_date:taskDate,
+    assign_month:payload.assign_month||String(taskDate||"").slice(0,7),
+    type:payload.type||payload.task_type||"",
+    package_name:payload.package_name||payload.package||"",
+    domain:payload.domain_url||payload.domain||"",
+    domain_notified:payload.domain_notified??"",
+    queue_status:payload.queue_status||"",
+    detail:payload.detail||payload.message||"",
+    error:payload.error||"",
+    payload_json:JSON.stringify(payload||{}).slice(0,45000),
+    app_version:"tracking-v1",
+    user_agent:navigator.userAgent
+  };
+}
+
+async function sendTrackingLog(action,payload={}){
+  if(!settings.trackingWebhook)return {skipped:true};
+  const body=buildTrackingPayload(action,payload);
+  try{
+    const res=await fetch(settings.trackingWebhook,{
+      method:"POST",
+      headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body:JSON.stringify(body)
+    });
+    return {ok:true,status:res.status};
+  }catch(e){
+    console.warn("Tracking log failed", e, body);
+    logDebug("⚠️ Tracking log failed",{action,source_id:body.source_id,project:body.project,error:e?.message||String(e)});
+    return {ok:false,error:e?.message||String(e)};
+  }
+}
+
+async function sendTelegram(data){
+  if(!settings.telegramWebhook){
+    await sendTrackingLog("telegram_send",{...data,result:"skipped",error:"missing_telegram_webhook"});
+    return;
+  }
+  try{
+    await fetch(settings.telegramWebhook,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(data)});
+    await sendTrackingLog("telegram_send",{...data,result:"success"});
+  }catch(e){
+    console.error("Telegram error",e);
+    await sendTrackingLog("telegram_send",{...data,result:"failed",error:e?.message||String(e)});
+    throw e;
+  }
+}
+
+async function logAction(action,taskId,sourceId,project,person,detail="",am=""){
+  const trackPayload={action,task_id:taskId||"",source_id:sourceId||"",project:project||"",person:person||"",am:am||"",detail:detail||"",result:"success"};
+  if(supabaseClient){
+    try{
+      await supabaseClient.from("task_audit_logs").insert({action,task_id:taskId,source_id:sourceId,project,person,am,detail});
+    }catch(e){
+      console.warn("audit log failed",e);
+      trackPayload.result="failed";
+      trackPayload.error=e?.message||String(e);
+    }
+  }
+  await sendTrackingLog(action,trackPayload);
+}
 async function loadAuditLogs(){if(!requireDb())return;const {data,error}=await supabaseClient.from("task_audit_logs").select("*").order("created_at",{ascending:false}).limit(300);if(error){toast("Lỗi load logs: "+error.message,"#b71c1c");return}auditLogs=data||[];logsBody.innerHTML=auditLogs.map(l=>`<tr><td>${esc(new Date(l.created_at).toLocaleString())}</td><td>${esc(l.action)}</td><td>${esc(l.project||"")}</td><td>${esc(l.person||"")}</td><td>${esc(l.am||"")}</td><td>${esc(l.detail||"")}</td></tr>`).join("")}
 
 
@@ -3907,6 +3983,7 @@ async function bulkAssignSelected(){
     }
 
     clearDebug();
+    await sendTrackingLog("assign_batch_start",{result:"info",detail:`Start assign batch ${selectedRows.length} project`,payload:{source_ids:selectedRows.map(r=>r.source_id)}});
     toast("Đang assign trong Supabase RPC...", "#f05a28");
     logDebug("Assign batch RPC source_ids", selectedRows.map(r=>r.source_id));
 
@@ -3964,6 +4041,7 @@ async function bulkAssignSelected(){
       `Assign xong: ${assignedRows.length} mới, ${restoredRows.length} restore, ${skippedRows.length} bỏ qua. Telegram: ${notifyResult.sent} gửi, ${notifyResult.missing} thiếu ID (${sec}s)`,
       "#2e7d32"
     );
+    await sendTrackingLog("assign_batch_done",{result:"success",detail:`Assigned ${assignedRows.length}, restored ${restoredRows.length}, skipped ${skippedRows.length}, telegram sent ${notifyResult.sent}`,assigned_count:assignedRows.length,restored_count:restoredRows.length,skipped_count:skippedRows.length,telegram_result:notifyResult});
 
     // Reload một lần duy nhất sau khi assign + gửi thông báo xong.
     await loadQueue();
@@ -3977,6 +4055,7 @@ async function bulkAssignSelected(){
     console.error("Bulk assign RPC failed", e);
     logDebug("ASSIGN RPC / TELEGRAM ERROR", e.message||e);
     toast("Lỗi assign batch: "+(e.message||e), "#b71c1c");
+    await sendTrackingLog("assign_batch_error",{result:"failed",error:e?.message||String(e),detail:"Bulk assign RPC/Telegram failed"});
   }finally{
     if(assignBtn){
       assignBtn.disabled=false;
@@ -4031,6 +4110,10 @@ async function sendBulkAssignNotifications(assignedRows, originalQueueRows=[]){
     try{
       await sendTelegram({
         event:"new",
+        source_id:sourceId,
+        project,
+        task_date:taskDate,
+        result:"success",
         person,
         person_chat_id:webMember?.telegram_chat_id||"",
         am,
