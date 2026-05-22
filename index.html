@@ -1106,9 +1106,37 @@ function queueFilterLabel(value){
   const map={CURRENT:"📥 Tiệm mới đủ info",NEW:"🟡 Chưa assign",ASSIGNED:"✅ Đã assign",PENDING_INFO:"⚠️ Pending info",SKIPPED:"⛔ Skipped",ALL:"📚 Tất cả"};
   return map[value]||map.CURRENT;
 }
+
+// Queue rule chuẩn:
+// - Tiệm mới đủ info = chưa assign, status NEW, và còn thuộc queue hiện tại
+//   hoặc đã từng báo domain nhưng chưa assign.
+// - Chỉ khi assign thành công mới chuyển sang ASSIGNED và rời khỏi Tiệm mới đủ info.
+function isQueueAssigned(row){
+  return (row?.queue_status === "ASSIGNED") ||
+    !!String(row?.assigned_person || "").trim() ||
+    !!String(row?.assigned_date || "").trim() ||
+    !!String(row?.assigned_month || "").trim();
+}
+
+function isQueueNew(row){
+  return (row?.queue_status || "NEW") === "NEW";
+}
+
+function shouldShowInCurrentQueue(row){
+  if(!row)return false;
+  if(isQueueAssigned(row))return false;
+  if(!isQueueNew(row))return false;
+
+  return !!(
+    row.is_current ||
+    row.force_current ||
+    row.domain_notified
+  );
+}
+
 function updateQueueMenuCounts(){
   const counts={
-    current:queueRows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW").length,
+    current:queueRows.filter(r=>shouldShowInCurrentQueue(r)).length,
     new:queueRows.filter(r=>(r.queue_status||"NEW")==="NEW").length,
     assigned:queueRows.filter(r=>r.queue_status==="ASSIGNED").length,
     pending:queueRows.filter(r=>r.queue_status==="PENDING_INFO").length,
@@ -1257,7 +1285,7 @@ function getQueueRowsByFilter(filterValue){
   let rows=[...queueRows];
 
   if(filterValue==="CURRENT"){
-    rows=rows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW");
+    rows=rows.filter(r=>shouldShowInCurrentQueue(r));
   }else if(filterValue&&filterValue!=="ALL"){
     rows=rows.filter(r=>(r.queue_status||"NEW")===filterValue);
   }
@@ -1269,7 +1297,7 @@ function getQueueRowsByFilter(filterValue){
   let rows=[...queueRows];
 
   if(filterValue==="CURRENT"){
-    rows=rows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW");
+    rows=rows.filter(r=>shouldShowInCurrentQueue(r));
   }else if(filterValue&&filterValue!=="ALL"){
     rows=rows.filter(r=>(r.queue_status||"NEW")===filterValue);
   }
@@ -1280,7 +1308,7 @@ function getQueueRowsByFilter(filterValue){
 function renderQueueKpis(){
   const month=document.getElementById("queueAssignMonthFilter")?.value||`${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,"0")}`;
 
-  const currentCount=queueRows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW").length;
+  const currentCount=queueRows.filter(r=>shouldShowInCurrentQueue(r)).length;
 
   const monthAssigned=queueRows.filter(r=>{
     const m=String(r.assigned_month||r.assigned_date||"").slice(0,7);
@@ -1476,7 +1504,7 @@ function renderQueue(){
   let rows=[...queueRows];
 
   if(st==="CURRENT"){
-    rows=rows.filter(r=>r.is_current&&(r.queue_status||"NEW")==="NEW");
+    rows=rows.filter(r=>shouldShowInCurrentQueue(r));
   }else if(st!=="ALL"){
     rows=rows.filter(r=>(r.queue_status||"NEW")===st);
   }
@@ -2071,6 +2099,30 @@ async function notifyManualDomain(){
     toast("Đã gửi Telegram nhưng lỗi đánh dấu đã báo domain: "+updateError.message, "#b71c1c");
     console.error(updateError);
     return;
+  }
+
+  // Sau khi báo domain, nếu project CHƯA ASSIGN thì vẫn giữ/đưa về Tiệm mới đủ info.
+  // Không đụng vào project đã assign để tránh mất assignee hoặc đổi Calendar.
+  const unassignedNotifiedIds=notYetNotified
+    .filter(r=>!isQueueAssigned(r))
+    .map(r=>r.source_id);
+
+  if(unassignedNotifiedIds.length){
+    const {error:keepCurrentError}=await supabaseClient
+      .from("task_queue")
+      .update({
+        queue_status:"NEW",
+        is_current:true,
+        force_current:true,
+        updated_at:nowIso
+      })
+      .in("source_id",unassignedNotifiedIds);
+
+    if(keepCurrentError){
+      toast("Đã báo domain nhưng lỗi giữ project trong Tiệm mới đủ info: "+keepCurrentError.message, "#b71c1c");
+      console.error(keepCurrentError);
+      return;
+    }
   }
 
   await Promise.all(notYetNotified.map(r=>
