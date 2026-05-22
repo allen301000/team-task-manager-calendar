@@ -1449,6 +1449,62 @@ async function countAssignedInCalendarMonth(month){
   return count||0;
 }
 
+
+let assignedMonthCalendarCache={month:"",keys:null,tasks:[],loading:false,token:0,error:null};
+
+function taskMonthMatchKeys(tasks){
+  const keys=new Set();
+  (tasks||[]).forEach(t=>{
+    taskAssignKeys(t).forEach(k=>{if(k)keys.add(k);});
+    const source=normalizeAssignMatchKey(t?.source_id);
+    if(source)keys.add(source);
+    const text=normalizeAssignMatchKey(t?.text);
+    if(text)keys.add(text);
+  });
+  return keys;
+}
+
+async function loadAssignedMonthCalendarCache(month){
+  if(!month){
+    assignedMonthCalendarCache={month:"",keys:null,tasks:[],loading:false,token:assignedMonthCalendarCache.token+1,error:null};
+    return assignedMonthCalendarCache;
+  }
+
+  if(assignedMonthCalendarCache.month===month&&assignedMonthCalendarCache.keys){
+    return assignedMonthCalendarCache;
+  }
+
+  if(assignedMonthCalendarCache.month===month&&assignedMonthCalendarCache.loading){
+    return assignedMonthCalendarCache;
+  }
+
+  const token=(assignedMonthCalendarCache.token||0)+1;
+  assignedMonthCalendarCache={month,keys:null,tasks:[],loading:true,token,error:null};
+
+  try{
+    const {start,end}=monthRangeFromLabel(month);
+    const tasks=await selectTasksByDateRange(start,end);
+    const valid=(tasks||[]).filter(t=>t&&t.text&&t.person);
+    const keys=taskMonthMatchKeys(valid);
+
+    if(assignedMonthCalendarCache.token!==token)return assignedMonthCalendarCache;
+
+    assignedMonthCalendarCache={month,keys,tasks:valid,loading:false,token,error:null};
+    return assignedMonthCalendarCache;
+  }catch(error){
+    console.error("Load assigned month Calendar cache failed",error);
+    if(assignedMonthCalendarCache.token===token){
+      assignedMonthCalendarCache={month,keys:new Set(),tasks:[],loading:false,token,error};
+    }
+    return assignedMonthCalendarCache;
+  }
+}
+
+function rowHasCalendarTaskInMonth(row,cache){
+  if(!row||!cache||!cache.keys)return false;
+  return queueAssignKeys(row).some(k=>cache.keys.has(k));
+}
+
 function renderQueueKpis(){
   const month=document.getElementById("queueAssignMonthFilter")?.value||`${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,"0")}`;
 
@@ -1661,9 +1717,31 @@ function renderQueue(){
   const assignMonth=document.getElementById("queueAssignMonthFilter")?.value||"";
 
   let rows=[...queueRows];
+  let calendarMonthMode=false;
+  let calendarMonthLoading=false;
+  let calendarMonthError=null;
 
   if(st==="CURRENT"){
     rows=rows.filter(r=>shouldShowInCurrentQueue(r));
+  }else if(st==="ASSIGNED"&&assignMonth){
+    // Khi xem Đã assign theo tháng, phải lọc theo Calendar/tasks thật.
+    // Không dùng task_queue.assigned_month vì field này có thể còn sót sau khi xóa task test.
+    calendarMonthMode=true;
+
+    if(assignedMonthCalendarCache.month===assignMonth&&assignedMonthCalendarCache.keys){
+      rows=rows.filter(r=>rowHasCalendarTaskInMonth(r,assignedMonthCalendarCache));
+    }else{
+      calendarMonthLoading=true;
+      rows=[];
+
+      loadAssignedMonthCalendarCache(assignMonth).then(()=>{
+        if(queueStatusFilter.value==="ASSIGNED"&&(document.getElementById("queueAssignMonthFilter")?.value||"")===assignMonth){
+          renderQueue();
+        }
+      });
+    }
+
+    calendarMonthError=assignedMonthCalendarCache.month===assignMonth?assignedMonthCalendarCache.error:null;
   }else if(st!=="ALL"){
     rows=rows.filter(r=>(r.queue_status||"NEW")===st);
   }
@@ -1672,7 +1750,7 @@ function renderQueue(){
     rows=rows.filter(r=>(r.package_name||pkgFromProject(r.project||r.source_id))===pkg);
   }
 
-  if(assignMonth){
+  if(assignMonth&&!calendarMonthMode){
     rows=rows.filter(r=>{
       const m=String(r.assigned_month||r.assigned_date||"").slice(0,7);
       return m===assignMonth;
@@ -1701,7 +1779,17 @@ function renderQueue(){
   if(document.getElementById("queueResultSummary")){
     const label=queueStatusFilter.options[queueStatusFilter.selectedIndex]?.textContent||"Queue";
     const more=rows.length>visibleRows.length?` • Đang hiển thị ${visibleRows.length}/${rows.length}, dùng Search để lọc thêm`:"";
-    queueResultSummary.textContent=`${label}: ${rows.length} project${more} • Domain thật: ${rows.filter(x=>String(x.domain_url||"").trim()).length} • Đã báo domain: ${rows.filter(x=>x.domain_notified).length}`;
+    const baseSummary=`${label}: ${rows.length} project${more} • Domain thật: ${rows.filter(x=>String(x.domain_url||"").trim()).length} • Đã báo domain: ${rows.filter(x=>x.domain_notified).length}`;
+
+    if(calendarMonthLoading){
+      queueResultSummary.textContent=`${label}: đang tải dữ liệu Calendar/tasks tháng ${assignMonth}.`;
+    }else if(calendarMonthMode){
+      const taskCount=assignedMonthCalendarCache.month===assignMonth&&assignedMonthCalendarCache.tasks?assignedMonthCalendarCache.tasks.length:rows.length;
+      const errText=calendarMonthError?` • Lỗi tải Calendar, đang hiển thị 0`:"";
+      queueResultSummary.textContent=`${baseSummary} • Đếm theo Calendar/tasks thật: ${taskCount}${errText}`;
+    }else{
+      queueResultSummary.textContent=baseSummary;
+    }
   }
 
   const token=++queueRenderToken;
