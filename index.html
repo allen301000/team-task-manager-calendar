@@ -1114,8 +1114,8 @@ const DEFAULTS={editCode:"TEAM2026",supabaseUrl:"",supabaseKey:"",sheetApi:"",te
 // Sau đó mở ở máy/browser khác, app sẽ tự load Sheet API / Telegram / Tracking / Domain group từ Supabase app_settings.
 // Lưu ý: chỉ dùng Supabase anon/publishable key, tuyệt đối không dùng service_role key.
 const BOOTSTRAP_CONFIG={
-  supabaseUrl:"https://letbykkygmmdxbmnemam.supabase.co", // ví dụ: "https://xxxx.supabase.co"
-  supabaseKey:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxldGJ5a2t5Z21tZHhibW5lbWFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzODAyNTMsImV4cCI6MjA4Mzk1NjI1M30.K8n2WgP7UDu6h5bMlMXwc2HfotUNaoZYRcfE5ninOrc", // anon / publishable key
+  supabaseUrl:"", // ví dụ: "https://xxxx.supabase.co"
+  supabaseKey:"", // anon / publishable key
   settingsProfile:"default"
 };
 const TYPES=["Design + QR","Design","Menu + QR","Custom + QR","Menu","QR"];
@@ -4249,78 +4249,67 @@ async function ensureMembersReadyForNotify(){
   }
 }
 
-async function sendOneAssignTelegramNotification(payload, webMember, amMember){
-  const result={
-    web_sent:0,
-    am_sent:0,
-    missing_web:0,
-    missing_am:0,
-    failed:0
-  };
-
+async function sendOneAssignTelegramNotification(payload, webMember, amMember, options={}){
+  const result={web_sent:0,am_sent:0,missing_web:0,missing_am:0,failed:0};
+  const context=options.context||payload.context||"assign_batch";
+  const taskId=payload.task_id||null;
   const webChatId=String(webMember?.telegram_chat_id||"").trim();
   const amChatId=String(amMember?.telegram_chat_id||"").trim();
+  const basePayload={
+    ...payload,
+    event:"new",
+    context,
+    message:String(payload.message||"").trim()
+  };
 
-  // Gửi riêng cho Web trước. Như vậy AM thiếu ID hoặc lỗi AM sẽ không làm Web mất thông báo.
+  // IMPORTANT:
+  // Gửi Web và AM bằng 2 request độc lập, có recipient rõ ràng.
+  // Không gửi kèm chat_id của người còn lại để Apps Script không route kép và không báo lỗi thiếu ID giả.
   if(webChatId){
     try{
       await sendTelegram({
-        ...payload,
+        ...basePayload,
         recipient:"web",
+        recipient_type:"web",
         person_chat_id:webChatId,
-        am_chat_id:""
+        assignee_chat_id:webChatId
       });
       result.web_sent++;
+      await recordTelegramNotifyLog({context,recipient:"web",status:"success",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,chat_id:webChatId,detail:"Sent to Web"});
     }catch(e){
       result.failed++;
-      logDebug("⚠️ Gửi Telegram cho Web lỗi",{
-        source_id:payload.source_id,
-        project:payload.project,
-        person:payload.person,
-        chat_id:webChatId,
-        error:e?.message||String(e)
-      });
+      await recordTelegramNotifyLog({context,recipient:"web",status:"failed",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,chat_id:webChatId,error:e?.message||String(e)});
+      logDebug("⚠️ Gửi Telegram cho Web lỗi",{source_id:payload.source_id,project:payload.project,person:payload.person,chat_id:webChatId,error:e?.message||String(e)});
     }
   }else{
     result.missing_web++;
-    logDebug("⚠️ Không gửi được Telegram cho Web vì thiếu telegram_chat_id",{
-      source_id:payload.source_id,
-      project:payload.project,
-      person:payload.person
-    });
+    await recordTelegramNotifyLog({context,recipient:"web",status:"missing",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,error:"Missing Web telegram_chat_id"});
+    logDebug("⚠️ Không gửi được Telegram cho Web vì thiếu telegram_chat_id",{source_id:payload.source_id,project:payload.project,person:payload.person});
   }
 
-  // Gửi riêng cho AM nếu có AM hợp lệ.
-  if(String(payload.am||"").trim() && String(payload.am||"").trim()!=="None"){
+  const shouldSendAm=String(payload.am||"").trim() && String(payload.am||"").trim()!=="None";
+  if(shouldSendAm){
     if(amChatId){
       try{
         await sendTelegram({
-          ...payload,
+          ...basePayload,
           recipient:"am",
-          person_chat_id:"",
+          recipient_type:"am",
           am_chat_id:amChatId
         });
         result.am_sent++;
+        await recordTelegramNotifyLog({context,recipient:"am",status:"success",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,chat_id:amChatId,detail:"Sent to AM"});
       }catch(e){
         result.failed++;
-        logDebug("⚠️ Gửi Telegram cho AM lỗi",{
-          source_id:payload.source_id,
-          project:payload.project,
-          am:payload.am,
-          chat_id:amChatId,
-          error:e?.message||String(e)
-        });
+        await recordTelegramNotifyLog({context,recipient:"am",status:"failed",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,chat_id:amChatId,error:e?.message||String(e)});
+        logDebug("⚠️ Gửi Telegram cho AM lỗi",{source_id:payload.source_id,project:payload.project,am:payload.am,chat_id:amChatId,error:e?.message||String(e)});
       }
     }else{
       result.missing_am++;
-      logDebug("⚠️ Không gửi được Telegram cho AM vì thiếu telegram_chat_id",{
-        source_id:payload.source_id,
-        project:payload.project,
-        am:payload.am
-      });
+      await recordTelegramNotifyLog({context,recipient:"am",status:"missing",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,error:"Missing AM telegram_chat_id"});
+      logDebug("⚠️ Không gửi được Telegram cho AM vì thiếu telegram_chat_id",{source_id:payload.source_id,project:payload.project,am:payload.am});
     }
   }
-
   return result;
 }
 
@@ -5023,10 +5012,25 @@ async function sendOneAssignTelegramNotification(payload, webMember, amMember, o
   const taskId=payload.task_id||null;
   const webChatId=String(webMember?.telegram_chat_id||"").trim();
   const amChatId=String(amMember?.telegram_chat_id||"").trim();
+  const basePayload={
+    ...payload,
+    event:"new",
+    context,
+    message:String(payload.message||"").trim()
+  };
 
+  // IMPORTANT:
+  // Gửi Web và AM bằng 2 request độc lập, có recipient rõ ràng.
+  // Không gửi kèm chat_id của người còn lại để Apps Script không route kép và không báo lỗi thiếu ID giả.
   if(webChatId){
     try{
-      await sendTelegram({...payload,recipient:"web",person_chat_id:webChatId,am_chat_id:""});
+      await sendTelegram({
+        ...basePayload,
+        recipient:"web",
+        recipient_type:"web",
+        person_chat_id:webChatId,
+        assignee_chat_id:webChatId
+      });
       result.web_sent++;
       await recordTelegramNotifyLog({context,recipient:"web",status:"success",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,chat_id:webChatId,detail:"Sent to Web"});
     }catch(e){
@@ -5040,10 +5044,16 @@ async function sendOneAssignTelegramNotification(payload, webMember, amMember, o
     logDebug("⚠️ Không gửi được Telegram cho Web vì thiếu telegram_chat_id",{source_id:payload.source_id,project:payload.project,person:payload.person});
   }
 
-  if(String(payload.am||"").trim() && String(payload.am||"").trim()!=="None"){
+  const shouldSendAm=String(payload.am||"").trim() && String(payload.am||"").trim()!=="None";
+  if(shouldSendAm){
     if(amChatId){
       try{
-        await sendTelegram({...payload,recipient:"am",person_chat_id:"",am_chat_id:amChatId});
+        await sendTelegram({
+          ...basePayload,
+          recipient:"am",
+          recipient_type:"am",
+          am_chat_id:amChatId
+        });
         result.am_sent++;
         await recordTelegramNotifyLog({context,recipient:"am",status:"success",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,chat_id:amChatId,detail:"Sent to AM"});
       }catch(e){
@@ -5063,67 +5073,23 @@ async function sendOneAssignTelegramNotification(payload, webMember, amMember, o
 async function notifyOneAssignedTask(task, queueRow={}, context="manual_resend"){
   await ensureMembersReadyForNotify();
 
-  // Gửi lại Telegram phải lấy đúng dữ liệu đang có trên Calendar/tasks.
-  // Không lấy AM/Web từ Sheet/Queue để tránh lệch dữ liệu sau khi đã assign.
-  const sourceId=String(task.source_id||"").trim();
+  // Luôn lấy dữ liệu chính từ Calendar/tasks.
+  // Queue/Sheet chỉ dùng fallback nếu task thiếu field.
+  const sourceId=String(task.source_id||queueRow.source_id||"").trim();
   const project=String(task.text||queueRow.project||sourceId).trim();
-  const personRaw=String(task.person||"").trim();
-  const amRaw=String(task.am||"").trim();
+  const person=String(task.person||"").trim();
   const taskDate=String(task.task_date||"").slice(0,10);
   const type=String(task.type||pickAssignTypeFromProject(project)).trim();
 
-  if(!project){
-    throw new Error("Task không có project/text trong Calendar");
-  }
-  if(!personRaw){
-    await recordTelegramNotifyLog({
-      context,
-      recipient:"web",
-      status:"missing",
-      source_id:sourceId,
-      task_id:task.id||null,
-      task_date:taskDate,
-      project,
-      person:"",
-      am:amRaw,
-      error:"Calendar task thiếu Web/person"
-    });
-    throw new Error(`Calendar task thiếu Web/person: ${project}`);
-  }
+  const amInfo=resolveAssignAm(task.am||queueRow.am||"None",{...queueRow,source_id:sourceId,project});
+  const am=amInfo.name||"None";
+  const webMember=findMemberLooseByName(person,["WEB","BOTH"])||memberByName(person);
+  const amMember=amInfo.member||findMemberLooseByName(am,["AM","BOTH"]);
 
-  const webMember=findMemberLooseByName(personRaw,["WEB","BOTH"])||memberByName(personRaw);
-  const webName=webMember?.name||personRaw;
+  debugMissingTelegramForAssign({source_id:sourceId,project,person,webMember,am,amMember,rawAm:amInfo.raw||task.am||queueRow.am||""});
 
-  let am="None";
-  let amMember=null;
-  let amInfo={name:"None",member:null,raw:amRaw};
-
-  if(amRaw && !/^(none|n\/a|na|no|khong|không)$/i.test(amRaw)){
-    amInfo=resolveAssignAm(amRaw,{source_id:sourceId,project});
-    am=amInfo.name||amRaw;
-    amMember=amInfo.member||findMemberLooseByName(am,["AM","BOTH"]);
-  }
-
-  debugMissingTelegramForAssign({
-    source_id:sourceId,
-    project,
-    person:webName,
-    webMember,
-    am,
-    amMember,
-    rawAm:amRaw
-  });
-
-  const msg=`Project: ${project}
-Type: ${type}
-
-Member: ${webName}
-AM: ${am}
-📅 ${taskDate}`;
-
+  const msg=`Project: ${project}\nType: ${type}\n\nMember: ${person}\nAM: ${am}\n📅 ${taskDate}`;
   const payload={
-    // Apps Script Telegram webhook chỉ route gửi task với event="new".
-    // context giữ lại để log biết đây là gửi lại thủ công.
     event:"new",
     context,
     source_id:sourceId,
@@ -5131,7 +5097,7 @@ AM: ${am}
     project,
     task_date:taskDate,
     result:"success",
-    person:webName,
+    person,
     am,
     type,
     message:msg
