@@ -696,6 +696,7 @@ td .badge.urgent{margin-top:4px}
       <button data-page="report">📊 Report</button>
       <button data-page="members">👤 Members / AM</button>
       <button data-page="logs">🧾 Audit Logs</button>
+      <button data-page="telegram_notify">📣 Gửi lại Tele</button>
       <button data-page="setup">⚙️ Setup</button>
     </div>
 
@@ -937,6 +938,78 @@ td .badge.urgent{margin-top:4px}
       </div>
     </section>
 
+
+    <section id="page-telegram_notify" class="hidden">
+      <div class="top">
+        <div>
+          <h2>📣 Gửi lại thông báo Telegram</h2>
+          <div class="sub">Gửi lại thông báo cho các task đã assign trong ngày chọn, có log riêng Web / AM.</div>
+        </div>
+        <div class="tools">
+          <input type="date" id="resendNotifyDate" style="width:auto">
+          <button onclick="loadResendNotifyTasks()">Load task trong ngày</button>
+          <button class="primary" onclick="resendTelegramForSelectedTasks()">Gửi lại Tele đã chọn</button>
+          <button class="ghost" onclick="loadTelegramNotifyLogs()">Reload log</button>
+        </div>
+      </div>
+
+      <div class="card queue-table-card">
+        <div class="queue-section-title">
+          <div>
+            <h3>Task đã assign trong ngày</h3>
+            <div class="muted" id="resendNotifySummary">Chưa load task</div>
+          </div>
+          <div class="muted">Tick task cần gửi lại. Web và AM được gửi riêng, lỗi nào sẽ log riêng lỗi đó.</div>
+        </div>
+
+        <div class="queue-toolbar">
+          <div class="queue-toolbar-left">
+            <input id="resendNotifySearch" class="queue-search-input" placeholder="Tìm project / member / AM..." oninput="renderResendNotifyTasks()">
+          </div>
+          <div class="queue-toolbar-right">
+            <button class="ghost" onclick="toggleResendNotifyCheckAll(true)">Chọn tất cả</button>
+            <button class="ghost" onclick="toggleResendNotifyCheckAll(false)">Bỏ chọn</button>
+            <button class="ghost" onclick="resendNotifySearch.value='';renderResendNotifyTasks()">Clear search</button>
+          </div>
+        </div>
+
+        <div class="wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><input type="checkbox" id="resendNotifyCheckAll" onchange="toggleResendNotifyCheckAll(this.checked)"></th>
+                <th>Date</th>
+                <th>Project</th>
+                <th>Web</th>
+                <th>AM</th>
+                <th>Type</th>
+                <th>Web Tele</th>
+                <th>AM Tele</th>
+                <th>Lỗi gần nhất</th>
+              </tr>
+            </thead>
+            <tbody id="resendNotifyBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card queue-table-card" style="margin-top:12px">
+        <div class="queue-section-title">
+          <div>
+            <h3>Log gửi Telegram</h3>
+            <div class="muted" id="telegramNotifyLogSummary">Hiển thị log gửi Web / AM gần nhất</div>
+          </div>
+          <div class="muted">Log này giúp biết đã gửi cho Web hay AM chưa và lỗi ở đâu.</div>
+        </div>
+        <div class="wrap">
+          <table>
+            <thead><tr><th>Time</th><th>Context</th><th>Recipient</th><th>Status</th><th>Project</th><th>Person</th><th>AM</th><th>Chat ID</th><th>Error</th></tr></thead>
+            <tbody id="telegramNotifyLogBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <section id="page-logs" class="hidden">
       <div class="top"><div><h2>🧾 Audit Logs</h2><div class="sub">Theo dõi assign, unassign, delete, move, done.</div></div><button onclick="loadAuditLogs()">Reload</button></div>
       <div class="card"><div class="wrap"><table><thead><tr><th>Time</th><th>Action</th><th>Project</th><th>Person</th><th>AM</th><th>Detail</th></tr></thead><tbody id="logsBody"></tbody></table></div></div>
@@ -949,7 +1022,16 @@ td .badge.urgent{margin-top:4px}
           <h3>Supabase</h3>
           <label>Supabase URL</label><input id="setSupabaseUrl" placeholder="https://xxx.supabase.co"><br><br>
           <label>Supabase anon / publishable key</label><input id="setSupabaseKey" placeholder="sb_publishable... hoặc anon key"><br><br>
-          <div class="note">Không đưa service role key lên GitHub Pages.</div>
+          <label>Setup profile key</label><input id="setSettingsProfile" placeholder="default"><br><br>
+          <div class="tools" style="margin-bottom:10px">
+            <button class="green" onclick="saveSettingsToCloud()">Lưu setup lên Supabase</button>
+            <button class="ghost" onclick="loadSettingsFromCloud()">Load setup từ Supabase</button>
+          </div>
+          <div class="tools" style="margin-bottom:10px">
+            <button class="ghost" onclick="exportSettingsToClipboard()">Copy setup JSON</button>
+            <button class="ghost" onclick="importSettingsFromPrompt()">Import setup JSON</button>
+          </div>
+          <div class="note">Không đưa service role key lên GitHub Pages. Muốn dùng ở máy/browser khác: nhập Supabase URL + anon key trước, bấm Load setup từ Supabase để tự kéo các key còn lại.</div>
         </div>
         <div class="card">
           <h3>Apps Script</h3>
@@ -1025,7 +1107,7 @@ td .badge.urgent{margin-top:4px}
 <div id="toast" class="toast"></div>
 
 <script>
-const DEFAULTS={editCode:"TEAM2026",supabaseUrl:"",supabaseKey:"",sheetApi:"",telegramWebhook:"",trackingWebhook:"",domainGroupChatId:"",domainMention:"@lee_web"};
+const DEFAULTS={editCode:"TEAM2026",supabaseUrl:"",supabaseKey:"",sheetApi:"",telegramWebhook:"",trackingWebhook:"",domainGroupChatId:"",domainMention:"@lee_web",settingsProfile:"default"};
 const TYPES=["Design + QR","Design","Menu + QR","Custom + QR","Design","Menu","QR"];
 const PACKAGE_POINTS={"Gói S":1,"Gói P":1,"Gói G":1.2,"Gói F":1.2,"Gói Menu + QR":1.5,"Gói Custom":2};
 const FALLBACK_MEMBERS=[
@@ -1482,14 +1564,53 @@ async function sendTrackingLog(action,payload={}){
 async function sendTelegram(data){
   if(!settings.telegramWebhook){
     await sendTrackingLog("telegram_send",{...data,result:"skipped",error:"missing_telegram_webhook"});
-    return;
+    throw new Error("Chưa cấu hình Telegram webhook URL trong Setup");
   }
+
+  const payload={
+    ...data,
+    // chuẩn hóa field để Apps Script dễ route
+    person_chat_id:String(data.person_chat_id||data.web_chat_id||data.assignee_chat_id||"").trim(),
+    am_chat_id:String(data.am_chat_id||"").trim()
+  };
+
   try{
-    await fetch(settings.telegramWebhook,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(data)});
-    await sendTrackingLog("telegram_send",{...data,result:"success"});
+    const res=await fetch(settings.telegramWebhook,{
+      method:"POST",
+      headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body:JSON.stringify(payload)
+    });
+
+    const responseText=await res.text().catch(()=>"");
+    let responseJson=null;
+    try{
+      responseJson=responseText?JSON.parse(responseText):null;
+    }catch(_){}
+
+    if(!res.ok){
+      throw new Error(`Telegram webhook HTTP ${res.status}: ${responseText.slice(0,300)}`);
+    }
+
+    // Nếu Apps Script trả {success:false} / {ok:false} thì coi là lỗi thật.
+    if(responseJson && (responseJson.success===false || responseJson.ok===false || responseJson.error)){
+      throw new Error(responseJson.error || responseJson.message || responseText.slice(0,300) || "Telegram webhook returned error");
+    }
+
+    await sendTrackingLog("telegram_send",{
+      ...payload,
+      result:"success",
+      webhook_status:res.status,
+      webhook_response:responseText.slice(0,1000)
+    });
+
+    return {ok:true,status:res.status,response:responseJson||responseText};
   }catch(e){
-    console.error("Telegram error",e);
-    await sendTrackingLog("telegram_send",{...data,result:"failed",error:e?.message||String(e)});
+    console.error("Telegram error",e,payload);
+    await sendTrackingLog("telegram_send",{
+      ...payload,
+      result:"failed",
+      error:e?.message||String(e)
+    });
     throw e;
   }
 }
@@ -4064,8 +4185,105 @@ async function bulkAssignSelected(){
   }
 }
 
+async function ensureMembersReadyForNotify(){
+  if(members && members.length)return;
+  try{
+    await loadMembers();
+  }catch(e){
+    console.warn("Không load được Members trước khi gửi Telegram", e);
+    logDebug("⚠️ Không load được Members trước khi gửi Telegram", e?.message||String(e));
+  }
+}
+
+async function sendOneAssignTelegramNotification(payload, webMember, amMember){
+  const result={
+    web_sent:0,
+    am_sent:0,
+    missing_web:0,
+    missing_am:0,
+    failed:0
+  };
+
+  const webChatId=String(webMember?.telegram_chat_id||"").trim();
+  const amChatId=String(amMember?.telegram_chat_id||"").trim();
+
+  // Gửi riêng cho Web trước. Như vậy AM thiếu ID hoặc lỗi AM sẽ không làm Web mất thông báo.
+  if(webChatId){
+    try{
+      await sendTelegram({
+        ...payload,
+        recipient:"web",
+        person_chat_id:webChatId,
+        am_chat_id:""
+      });
+      result.web_sent++;
+    }catch(e){
+      result.failed++;
+      logDebug("⚠️ Gửi Telegram cho Web lỗi",{
+        source_id:payload.source_id,
+        project:payload.project,
+        person:payload.person,
+        chat_id:webChatId,
+        error:e?.message||String(e)
+      });
+    }
+  }else{
+    result.missing_web++;
+    logDebug("⚠️ Không gửi được Telegram cho Web vì thiếu telegram_chat_id",{
+      source_id:payload.source_id,
+      project:payload.project,
+      person:payload.person
+    });
+  }
+
+  // Gửi riêng cho AM nếu có AM hợp lệ.
+  if(String(payload.am||"").trim() && String(payload.am||"").trim()!=="None"){
+    if(amChatId){
+      try{
+        await sendTelegram({
+          ...payload,
+          recipient:"am",
+          person_chat_id:"",
+          am_chat_id:amChatId
+        });
+        result.am_sent++;
+      }catch(e){
+        result.failed++;
+        logDebug("⚠️ Gửi Telegram cho AM lỗi",{
+          source_id:payload.source_id,
+          project:payload.project,
+          am:payload.am,
+          chat_id:amChatId,
+          error:e?.message||String(e)
+        });
+      }
+    }else{
+      result.missing_am++;
+      logDebug("⚠️ Không gửi được Telegram cho AM vì thiếu telegram_chat_id",{
+        source_id:payload.source_id,
+        project:payload.project,
+        am:payload.am
+      });
+    }
+  }
+
+  return result;
+}
+
 async function sendBulkAssignNotifications(assignedRows, originalQueueRows=[]){
-  const result={sent:0,missing:0,failed:0,skipped:0};
+  const result={
+    sent:0,
+    web_sent:0,
+    am_sent:0,
+    missing:0,
+    missing_web:0,
+    missing_am:0,
+    failed:0,
+    skipped:0
+  };
+
+  await ensureMembersReadyForNotify();
+
   const queueById=new Map((originalQueueRows||[]).map(r=>[String(r.source_id||""),r]));
 
   if(!settings.telegramWebhook){
@@ -4076,17 +4294,17 @@ async function sendBulkAssignNotifications(assignedRows, originalQueueRows=[]){
     return result;
   }
 
-  // Gửi tuần tự và nhường UI sau mỗi task để tránh Page Unresponsive.
   for(let i=0;i<assignedRows.length;i++){
     const item=assignedRows[i];
-    const sourceId=String(item.source_id||"");
+    const sourceId=String(item.source_id||"").trim();
     const queueRow=queueById.get(sourceId)||{};
-    const project=item.project||queueRow.project||sourceId;
-    const person=item.person||"";
-    const taskDate=item.task_date||"";
-    const type=item.task_type||pickAssignTypeFromProject(project);
+    const project=String(item.project||queueRow.project||sourceId).trim();
+    const person=String(item.person||"").trim();
+    const taskDate=String(item.task_date||"").slice(0,10);
+    const type=String(item.task_type||item.type||pickAssignTypeFromProject(project)).trim();
+
     const amInfo=resolveAssignAm(item.am||queueRow.am||"None",{...queueRow,source_id:sourceId,project});
-    const am=amInfo.name;
+    const am=amInfo.name||"None";
 
     const webMember=findMemberLooseByName(person,["WEB","BOTH"])||memberByName(person);
     const amMember=amInfo.member||findMemberLooseByName(am,["AM","BOTH"]);
@@ -4101,47 +4319,41 @@ async function sendBulkAssignNotifications(assignedRows, originalQueueRows=[]){
       rawAm:amInfo.raw||item.am||queueRow.am||""
     });
 
-    const hasWebChat=!!String(webMember?.telegram_chat_id||"").trim();
-    const hasAmChat=String(am||"").trim()==="None" || !!String(amMember?.telegram_chat_id||"").trim();
-    if(!hasWebChat || !hasAmChat)result.missing++;
-
     const msg=`Project: ${project}\nType: ${type}\n\nMember: ${person}\nAM: ${am}\n📅 ${taskDate}`;
 
+    const payload={
+      event:"new",
+      source_id:sourceId,
+      project,
+      task_date:taskDate,
+      result:"success",
+      person,
+      am,
+      type,
+      message:msg
+    };
+
+    const one=await sendOneAssignTelegramNotification(payload,webMember,amMember);
+
+    result.web_sent+=one.web_sent;
+    result.am_sent+=one.am_sent;
+    result.missing_web+=one.missing_web;
+    result.missing_am+=one.missing_am;
+    result.failed+=one.failed;
+    result.sent=result.web_sent+result.am_sent;
+    result.missing=result.missing_web+result.missing_am;
+
     try{
-      await sendTelegram({
-        event:"new",
-        source_id:sourceId,
-        project,
-        task_date:taskDate,
-        result:"success",
-        person,
-        person_chat_id:webMember?.telegram_chat_id||"",
-        am,
-        am_chat_id:amMember?.telegram_chat_id||"",
-        type,
-        message:msg
-      });
-
       await logAction("assign",item.task_id||null,sourceId,project,person,`Assigned by RPC batch / AM ${am}`,am);
-      result.sent++;
-    }catch(err){
-      result.failed++;
-      console.error("Bulk assign Telegram failed",err,item);
-      logDebug("⚠️ Gửi Telegram assign batch lỗi",{
-        source_id:sourceId,
-        project,
-        person,
-        am,
-        error:err?.message||String(err)
-      });
+    }catch(logErr){
+      console.warn("Assign log failed",logErr);
     }
 
-    if((i+1)%1===0){
-      toast(`Đang gửi Telegram ${i+1}/${assignedRows.length}...`, "#f05a28");
-      await yieldUi();
-    }
+    toast(`Đang gửi Telegram ${i+1}/${assignedRows.length}. Web: ${result.web_sent}, AM: ${result.am_sent}, thiếu ID: ${result.missing}`, "#f05a28");
+    await yieldUi();
   }
 
+  logDebug("Assign batch Telegram detail",result);
   return result;
 }
 
@@ -4478,7 +4690,7 @@ function renderReport(){const tasks=Object.values(cache).flat();reportTotal.text
 function openModal(id){document.getElementById(id).classList.add("open")}
 function closeModal(id){document.getElementById(id).classList.remove("open")}
 function closeModalOnBg(e,id){if(e.target.id===id)closeModal(id)}
-
+\n\n/* ===== Telegram resend + notification log + cloud setup patch ===== */\nlet resendNotifyRows=[];\nlet telegramNotifyLogs=[];\n\nfunction getSettingsSnapshot(){\n  return {\n    editCode:settings.editCode||DEFAULTS.editCode,\n    supabaseUrl:settings.supabaseUrl||"",\n    supabaseKey:settings.supabaseKey||"",\n    sheetApi:settings.sheetApi||"",\n    telegramWebhook:settings.telegramWebhook||"",\n    trackingWebhook:settings.trackingWebhook||"",\n    domainGroupChatId:settings.domainGroupChatId||"",\n    domainMention:settings.domainMention||"@lee_web",\n    settingsProfile:settings.settingsProfile||"default"\n  };\n}\n\nfunction applySettingsSnapshot(next={},shouldSave=true){\n  settings={...settings,...next};\n  if(shouldSave)localStorage.setItem("tm_settings",JSON.stringify(settings));\n  initClient();\n  const byId=id=>document.getElementById(id);\n  if(byId("setSupabaseUrl"))setSupabaseUrl.value=settings.supabaseUrl||"";\n  if(byId("setSupabaseKey"))setSupabaseKey.value=settings.supabaseKey||"";\n  if(byId("setSheetApi"))setSheetApi.value=settings.sheetApi||"";\n  if(byId("setTelegram"))setTelegram.value=settings.telegramWebhook||"";\n  if(byId("setTrackingWebhook"))setTrackingWebhook.value=settings.trackingWebhook||"";\n  if(byId("setDomainGroupChat"))setDomainGroupChat.value=settings.domainGroupChatId||"";\n  if(byId("setDomainMention"))setDomainMention.value=settings.domainMention||"@lee_web";\n  if(byId("setSettingsProfile"))setSettingsProfile.value=settings.settingsProfile||"default";\n}\n\nfunction setupUi(){\n  document.querySelectorAll(".nav button").forEach(b=>b.onclick=()=>{\n    if(b.dataset.page==="queue")setQueueMenuFilter(b.dataset.queueFilter||"CURRENT");\n    else showPage(b.dataset.page);\n  });\n  if(document.getElementById("workloadDate"))workloadDate.value=todayStr();\n  if(document.getElementById("resendNotifyDate"))resendNotifyDate.value=todayStr();\n  applySettingsSnapshot(settings,false);\n  if(document.getElementById("queueCurrentFilterChip"))queueCurrentFilterChip.textContent=queueFilterLabel(queueStatusFilter?.value||"CURRENT");\n  updateEditState();\n}\n\nasync function saveSettings(){\n  settings.supabaseUrl=setSupabaseUrl.value.trim();\n  settings.supabaseKey=setSupabaseKey.value.trim();\n  settings.sheetApi=setSheetApi.value.trim();\n  settings.telegramWebhook=setTelegram.value.trim();\n  settings.trackingWebhook=document.getElementById("setTrackingWebhook")?setTrackingWebhook.value.trim():"";\n  settings.domainGroupChatId=setDomainGroupChat.value.trim();\n  settings.domainMention=setDomainMention.value.trim()||"@lee_web";\n  settings.settingsProfile=document.getElementById("setSettingsProfile")?(setSettingsProfile.value.trim()||"default"):"default";\n  localStorage.setItem("tm_settings",JSON.stringify(settings));\n  initClient();\n  toast("Đã lưu setup trên trình duyệt", "#2e7d32");\n  try{await saveSettingsToCloud(false);}catch(e){logDebug("Không lưu cloud setup tự động", e?.message||String(e));}\n  loadMembers();\n}\n\nfunction showPage(page){\n  document.querySelectorAll(".nav button").forEach(b=>{\n    if(page==="queue"){\n      if(!b.dataset.queueFilter)b.classList.toggle("active",b.dataset.page==="queue");\n    }else{\n      b.classList.toggle("active",b.dataset.page===page&&!b.dataset.queueFilter);\n    }\n  });\n  if(page!=="queue")document.querySelectorAll(".nav [data-queue-filter]").forEach(btn=>btn.classList.remove("active"));\n  ["queue","domain_report","calendar","workload","report","members","logs","telegram_notify","setup"].forEach(p=>{\n    const el=document.getElementById(`page-${p}`);\n    if(el)el.classList.toggle("hidden",p!==page);\n  });\n  if(page==="queue")loadQueue();\n  if(page==="domain_report")loadDomainReport();\n  if(page==="calendar")render();\n  if(page==="workload")renderWorkload();\n  if(page==="report")renderReport();\n  if(page==="members")loadMembers();\n  if(page==="logs")loadAuditLogs();\n  if(page==="telegram_notify"){\n    if(document.getElementById("resendNotifyDate")&&!resendNotifyDate.value)resendNotifyDate.value=todayStr();\n    loadResendNotifyTasks();\n    loadTelegramNotifyLogs();\n  }\n}\n\nasync function saveSettingsToCloud(showToast=true){\n  if(!settings.supabaseUrl||!settings.supabaseKey){\n    if(showToast)toast("Cần nhập Supabase URL + anon key trước", "#b71c1c");\n    return;\n  }\n  initClient();\n  if(!supabaseClient)return;\n  const profile=(document.getElementById("setSettingsProfile")?.value||settings.settingsProfile||"default").trim()||"default";\n  settings.settingsProfile=profile;\n  const value=getSettingsSnapshot();\n  const {error}=await supabaseClient.from("app_settings").upsert({key:`task_manager:${profile}`,value,updated_at:new Date().toISOString()},{onConflict:"key"});\n  if(error){\n    logDebug("⚠️ Lưu setup cloud lỗi. Có thể chưa chạy SQL tạo bảng app_settings.", error.message);\n    if(showToast)toast("Lưu setup cloud lỗi: "+error.message, "#b71c1c");\n    return;\n  }\n  localStorage.setItem("tm_settings",JSON.stringify(settings));\n  if(showToast)toast("Đã lưu setup lên Supabase cloud", "#2e7d32");\n}\n\nasync function loadSettingsFromCloud(){\n  const url=document.getElementById("setSupabaseUrl")?.value.trim()||settings.supabaseUrl;\n  const key=document.getElementById("setSupabaseKey")?.value.trim()||settings.supabaseKey;\n  const profile=(document.getElementById("setSettingsProfile")?.value||settings.settingsProfile||"default").trim()||"default";\n  if(!url||!key){toast("Cần nhập Supabase URL + anon key trước để load setup cloud", "#b71c1c");return;}\n  settings.supabaseUrl=url; settings.supabaseKey=key; settings.settingsProfile=profile;\n  initClient();\n  const {data,error}=await supabaseClient.from("app_settings").select("value").eq("key",`task_manager:${profile}`).maybeSingle();\n  if(error){toast("Load setup cloud lỗi: "+error.message, "#b71c1c");logDebug("Load setup cloud lỗi",error.message);return;}\n  if(!data?.value){toast("Chưa có setup cloud cho profile này", "#8a6d00");return;}\n  applySettingsSnapshot({...data.value,supabaseUrl:url,supabaseKey:key,settingsProfile:profile},true);\n  toast("Đã load setup từ Supabase cloud", "#2e7d32");\n  await loadMembers();\n}\n\nasync function exportSettingsToClipboard(){\n  const text=JSON.stringify(getSettingsSnapshot(),null,2);\n  try{await navigator.clipboard.writeText(text);toast("Đã copy setup JSON", "#2e7d32");}\n  catch(e){prompt("Copy setup JSON:",text);}\n}\n\nfunction importSettingsFromPrompt(){\n  const raw=prompt("Dán setup JSON vào đây:");\n  if(!raw)return;\n  try{\n    const data=JSON.parse(raw);\n    applySettingsSnapshot(data,true);\n    toast("Đã import setup JSON", "#2e7d32");\n  }catch(e){toast("JSON không hợp lệ", "#b71c1c");}\n}\n\nfunction buildTelegramNotifyLogPayload(payload){\n  return {\n    created_at:new Date().toISOString(),\n    context:payload.context||payload.action||"assign_notify",\n    recipient:payload.recipient||"",\n    status:payload.status||"info",\n    source_id:payload.source_id||"",\n    task_id:payload.task_id||null,\n    task_date:payload.task_date||"",\n    project:payload.project||"",\n    person:payload.person||"",\n    am:payload.am||"",\n    chat_id:String(payload.chat_id||""),\n    error:payload.error||"",\n    detail:payload.detail||""\n  };\n}\n\nasync function recordTelegramNotifyLog(payload){\n  const log=buildTelegramNotifyLogPayload(payload);\n  telegramNotifyLogs.unshift(log);\n  telegramNotifyLogs=telegramNotifyLogs.slice(0,500);\n  try{localStorage.setItem("tm_telegram_notify_logs",JSON.stringify(telegramNotifyLogs.slice(0,200)));}catch(_){}\n  if(supabaseClient){\n    try{await supabaseClient.from("telegram_notification_logs").insert(log);}\n    catch(e){console.warn("telegram_notification_logs insert failed",e);}\n  }\n  await sendTrackingLog("telegram_notify_log",{...log,result:log.status,error:log.error});\n  renderTelegramNotifyLogs();\n  return log;\n}\n\nasync function loadTelegramNotifyLogs(){\n  telegramNotifyLogs=[];\n  if(supabaseClient){\n    try{\n      const {data,error}=await supabaseClient.from("telegram_notification_logs").select("*").order("created_at",{ascending:false}).limit(300);\n      if(error)throw error;\n      telegramNotifyLogs=data||[];\n    }catch(e){\n      logDebug("Không load được telegram_notification_logs, dùng local log", e?.message||String(e));\n    }\n  }\n  if(!telegramNotifyLogs.length){\n    try{telegramNotifyLogs=JSON.parse(localStorage.getItem("tm_telegram_notify_logs")||"[]");}catch(_){telegramNotifyLogs=[];}\n  }\n  renderTelegramNotifyLogs();\n}\n\nfunction renderTelegramNotifyLogs(){\n  const body=document.getElementById("telegramNotifyLogBody");\n  if(!body)return;\n  const rows=(telegramNotifyLogs||[]).slice(0,200);\n  if(document.getElementById("telegramNotifyLogSummary")){\n    const ok=rows.filter(x=>x.status==="success").length;\n    const fail=rows.filter(x=>x.status==="failed").length;\n    const missing=rows.filter(x=>x.status==="missing").length;\n    telegramNotifyLogSummary.textContent=`${rows.length} log gần nhất • success ${ok} • failed ${fail} • missing ${missing}`;\n  }\n  body.innerHTML=rows.map(l=>`<tr>\n    <td>${esc(new Date(l.created_at||Date.now()).toLocaleString())}</td>\n    <td>${esc(l.context||"")}</td>\n    <td>${esc(l.recipient||"")}</td>\n    <td><span class="badge ${l.status==="success"?"assigned":l.status==="missing"?"pending":"urgent"}">${esc(l.status||"")}</span></td>\n    <td>${esc(l.project||"")}</td>\n    <td>${esc(l.person||"")}</td>\n    <td>${esc(l.am||"")}</td>\n    <td>${esc(l.chat_id||"")}</td>\n    <td>${esc(l.error||l.detail||"")}</td>\n  </tr>`).join("")||'<tr><td colspan="9" class="muted">Chưa có log</td></tr>';\n}\n\nasync function sendOneAssignTelegramNotification(payload, webMember, amMember, options={}){\n  const result={web_sent:0,am_sent:0,missing_web:0,missing_am:0,failed:0};\n  const context=options.context||payload.context||"assign_batch";\n  const taskId=payload.task_id||null;\n  const webChatId=String(webMember?.telegram_chat_id||"").trim();\n  const amChatId=String(amMember?.telegram_chat_id||"").trim();\n\n  if(webChatId){\n    try{\n      await sendTelegram({...payload,recipient:"web",person_chat_id:webChatId,am_chat_id:""});\n      result.web_sent++;\n      await recordTelegramNotifyLog({context,recipient:"web",status:"success",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,chat_id:webChatId,detail:"Sent to Web"});\n    }catch(e){\n      result.failed++;\n      await recordTelegramNotifyLog({context,recipient:"web",status:"failed",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,chat_id:webChatId,error:e?.message||String(e)});\n      logDebug("⚠️ Gửi Telegram cho Web lỗi",{source_id:payload.source_id,project:payload.project,person:payload.person,chat_id:webChatId,error:e?.message||String(e)});\n    }\n  }else{\n    result.missing_web++;\n    await recordTelegramNotifyLog({context,recipient:"web",status:"missing",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,error:"Missing Web telegram_chat_id"});\n    logDebug("⚠️ Không gửi được Telegram cho Web vì thiếu telegram_chat_id",{source_id:payload.source_id,project:payload.project,person:payload.person});\n  }\n\n  if(String(payload.am||"").trim() && String(payload.am||"").trim()!=="None"){\n    if(amChatId){\n      try{\n        await sendTelegram({...payload,recipient:"am",person_chat_id:"",am_chat_id:amChatId});\n        result.am_sent++;\n        await recordTelegramNotifyLog({context,recipient:"am",status:"success",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,chat_id:amChatId,detail:"Sent to AM"});\n      }catch(e){\n        result.failed++;\n        await recordTelegramNotifyLog({context,recipient:"am",status:"failed",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,chat_id:amChatId,error:e?.message||String(e)});\n        logDebug("⚠️ Gửi Telegram cho AM lỗi",{source_id:payload.source_id,project:payload.project,am:payload.am,chat_id:amChatId,error:e?.message||String(e)});\n      }\n    }else{\n      result.missing_am++;\n      await recordTelegramNotifyLog({context,recipient:"am",status:"missing",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,error:"Missing AM telegram_chat_id"});\n      logDebug("⚠️ Không gửi được Telegram cho AM vì thiếu telegram_chat_id",{source_id:payload.source_id,project:payload.project,am:payload.am});\n    }\n  }\n  return result;\n}\n\nasync function notifyOneAssignedTask(task, queueRow={}, context="manual_resend"){\n  await ensureMembersReadyForNotify();\n  const sourceId=String(task.source_id||queueRow.source_id||"").trim();\n  const project=String(task.text||queueRow.project||sourceId).trim();\n  const person=String(task.person||"").trim();\n  const taskDate=String(task.task_date||"").slice(0,10);\n  const type=String(task.type||pickAssignTypeFromProject(project)).trim();\n  const amInfo=resolveAssignAm(task.am||queueRow.am||"None",{...queueRow,source_id:sourceId,project});\n  const am=amInfo.name||"None";\n  const webMember=findMemberLooseByName(person,["WEB","BOTH"])||memberByName(person);\n  const amMember=amInfo.member||findMemberLooseByName(am,["AM","BOTH"]);\n  debugMissingTelegramForAssign({source_id:sourceId,project,person,webMember,am,amMember,rawAm:amInfo.raw||task.am||queueRow.am||""});\n  const msg=`Project: ${project}\nType: ${type}\n\nMember: ${person}\nAM: ${am}\n📅 ${taskDate}`;\n  const payload={event:context==="manual_resend"?"resend_assign":"new",context,source_id:sourceId,task_id:task.id||null,project,task_date:taskDate,result:"success",person,am,type,message:msg};\n  return await sendOneAssignTelegramNotification(payload,webMember,amMember,{context});\n}\n\nasync function loadQueueRowsBySourceIds(ids){\n  const map=new Map();\n  const clean=[...new Set((ids||[]).map(x=>String(x||"").trim()).filter(Boolean))];\n  for(const chunk of chunkList(clean,100)){\n    const {data,error}=await supabaseClient.from("task_queue").select("*").in("source_id",chunk);\n    if(error){console.warn("loadQueueRowsBySourceIds failed",error);continue;}\n    (data||[]).forEach(r=>map.set(String(r.source_id||""),r));\n  }\n  return map;\n}\n\nasync function loadResendNotifyTasks(){\n  if(!requireDb())return;\n  const date=(document.getElementById("resendNotifyDate")?.value||todayStr()).slice(0,10);\n  if(!date){toast("Chưa chọn ngày", "#8a6d00");return;}\n  toast("Đang load task đã assign trong ngày", "#f05a28");\n  const {data,error}=await supabaseClient.from("tasks").select("*").eq("task_date",date).order("person",{ascending:true}).order("sort_order",{ascending:true});\n  if(error){toast("Lỗi load tasks: "+error.message, "#b71c1c");return;}\n  const tasks=data||[];\n  const qMap=await loadQueueRowsBySourceIds(tasks.map(t=>t.source_id));\n  resendNotifyRows=tasks.map(t=>({task:t,queue:qMap.get(String(t.source_id||""))||{},last_web:"",last_am:"",last_error:""}));\n  renderResendNotifyTasks();\n  toast(`Đã load ${resendNotifyRows.length} task ngày ${date}`, "#2e7d32");\n}\n\nfunction renderResendNotifyTasks(){\n  const body=document.getElementById("resendNotifyBody");\n  if(!body)return;\n  const q=(document.getElementById("resendNotifySearch")?.value||"").trim().toLowerCase();\n  let rows=[...resendNotifyRows];\n  if(q){\n    rows=rows.filter(x=>[x.task.text,x.task.person,x.task.am,x.queue.project,x.queue.am,x.task.source_id].join(" ").toLowerCase().includes(q));\n  }\n  if(document.getElementById("resendNotifySummary")){\n    resendNotifySummary.textContent=`${rows.length}/${resendNotifyRows.length} task đã assign trong ngày ${document.getElementById("resendNotifyDate")?.value||todayStr()}`;\n  }\n  body.innerHTML=rows.map((x,idx)=>{\n    const t=x.task,qrow=x.queue||{};\n    const project=String(t.text||qrow.project||t.source_id||"");\n    const type=String(t.type||pickAssignTypeFromProject(project));\n    return `<tr>\n      <td><input type="checkbox" class="resend-notify-check" value="${esc(t.id)}"></td>\n      <td>${esc(t.task_date||"")}</td>\n      <td><b>${esc(project)}</b><div class="muted">${esc(t.source_id||"")}</div></td>\n      <td>${esc(t.person||"")}</td>\n      <td>${esc(t.am||qrow.am||"")}</td>\n      <td>${esc(type)}</td>\n      <td>${x.last_web?esc(x.last_web):'<span class="muted">-</span>'}</td>\n      <td>${x.last_am?esc(x.last_am):'<span class="muted">-</span>'}</td>\n      <td>${x.last_error?`<span class="badge urgent">${esc(x.last_error)}</span>`:'<span class="muted">-</span>'}</td>\n    </tr>`;\n  }).join("")||'<tr><td colspan="9" class="muted">Không có task trong ngày này</td></tr>';\n}\n\nfunction toggleResendNotifyCheckAll(checked){\n  document.querySelectorAll(".resend-notify-check").forEach(cb=>cb.checked=checked);\n  const master=document.getElementById("resendNotifyCheckAll");\n  if(master)master.checked=checked;\n}\n\nasync function resendTelegramForSelectedTasks(){\n  if(!requireDb())return;\n  if(!settings.telegramWebhook){toast("Chưa nhập Telegram webhook URL trong Setup", "#b71c1c");return;}\n  const selected=[...document.querySelectorAll(".resend-notify-check:checked")].map(cb=>String(cb.value));\n  if(!selected.length){toast("Chưa chọn task để gửi lại", "#8a6d00");return;}\n  const rows=resendNotifyRows.filter(x=>selected.includes(String(x.task.id)));\n  if(!rows.length){toast("Không tìm thấy task đã chọn", "#b71c1c");return;}\n  if(!confirm(`Gửi lại thông báo Telegram cho ${rows.length} task trong ngày ${document.getElementById("resendNotifyDate")?.value||""}?`))return;\n  clearDebug();\n  let total={web_sent:0,am_sent:0,missing_web:0,missing_am:0,failed:0};\n  for(let i=0;i<rows.length;i++){\n    const x=rows[i];\n    try{\n      const r=await notifyOneAssignedTask(x.task,x.queue,"manual_resend");\n      total.web_sent+=r.web_sent; total.am_sent+=r.am_sent; total.missing_web+=r.missing_web; total.missing_am+=r.missing_am; total.failed+=r.failed;\n      x.last_web=r.web_sent?"sent":(r.missing_web?"missing":"-");\n      x.last_am=r.am_sent?"sent":(r.missing_am?"missing":"-");\n      x.last_error=r.failed?"failed":"";\n      await logAction("telegram_resend",x.task.id||null,x.task.source_id||"",x.task.text||x.queue.project||"",x.task.person||"",`Manual resend Telegram. Web ${x.last_web}, AM ${x.last_am}`,x.task.am||x.queue.am||"");\n    }catch(e){\n      total.failed++;\n      x.last_error=e?.message||String(e);\n      logDebug("⚠️ Gửi lại Telegram lỗi",{source_id:x.task.source_id,project:x.task.text,error:x.last_error});\n    }\n    toast(`Đang gửi lại ${i+1}/${rows.length}. Web ${total.web_sent}, AM ${total.am_sent}, lỗi ${total.failed}`, "#f05a28");\n    renderResendNotifyTasks();\n    await yieldUi();\n  }\n  await loadTelegramNotifyLogs();\n  renderResendNotifyTasks();\n  toast(`Gửi lại xong. Web ${total.web_sent}, AM ${total.am_sent}, thiếu ID ${total.missing_web+total.missing_am}, lỗi ${total.failed}`, total.failed?"#8a6d00":"#2e7d32");\n}\n\nasync function sendBulkAssignNotifications(assignedRows, originalQueueRows=[]){\n  const result={sent:0,web_sent:0,am_sent:0,missing:0,missing_web:0,missing_am:0,failed:0,skipped:0};\n  await ensureMembersReadyForNotify();\n  const queueById=new Map((originalQueueRows||[]).map(r=>[String(r.source_id||""),r]));\n  if(!settings.telegramWebhook){\n    logDebug("⚠️ Chưa cấu hình Telegram webhook, assign đã xong nhưng chưa thể gửi thông báo",{assigned_count:assignedRows.length});\n    result.failed=assignedRows.length;\n    return result;\n  }\n  for(let i=0;i<assignedRows.length;i++){\n    const item=assignedRows[i];\n    const sourceId=String(item.source_id||"").trim();\n    const queueRow=queueById.get(sourceId)||{};\n    const task={id:item.task_id||null,source_id:sourceId,text:item.project||queueRow.project||sourceId,person:item.person||"",task_date:item.task_date||"",type:item.task_type||item.type||"",am:item.am||queueRow.am||""};\n    const one=await notifyOneAssignedTask(task,queueRow,"assign_batch_auto");\n    result.web_sent+=one.web_sent; result.am_sent+=one.am_sent; result.missing_web+=one.missing_web; result.missing_am+=one.missing_am; result.failed+=one.failed;\n    result.sent=result.web_sent+result.am_sent; result.missing=result.missing_web+result.missing_am;\n    try{await logAction("assign",item.task_id||null,sourceId,task.text,task.person,`Assigned by RPC batch / AM ${task.am||"None"}. Telegram web ${one.web_sent}, am ${one.am_sent}, failed ${one.failed}`,task.am||"");}\n    catch(logErr){console.warn("Assign log failed",logErr);}\n    toast(`Đang gửi Telegram ${i+1}/${assignedRows.length}. Web: ${result.web_sent}, AM: ${result.am_sent}, thiếu ID: ${result.missing}`, "#f05a28");\n    await yieldUi();\n  }\n  logDebug("Assign batch Telegram detail",result);\n  return result;\n}\n\n
 initClient();
 setupUi();
 (async()=>{if(supabaseClient){await loadMembers();await render();await loadQueue();supabaseClient.channel("tasks-rt").on("postgres_changes",{event:"*",schema:"public",table:"tasks"},render).on("postgres_changes",{event:"*",schema:"public",table:"task_queue"},loadQueue).on("postgres_changes",{event:"*",schema:"public",table:"members"},loadMembers).subscribe()}else{members=FALLBACK_MEMBERS;refreshDropdowns();toast("Vào Setup để cấu hình Supabase","#8a6d00")}})();
