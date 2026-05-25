@@ -1020,25 +1020,26 @@ td .badge.urgent{margin-top:4px}
       <div class="grid two">
         <div class="card">
           <h3>Supabase</h3>
-          <label>Supabase URL</label><input id="setSupabaseUrl" placeholder="https://xxx.supabase.co"><br><br>
-          <label>Supabase anon / publishable key</label><input id="setSupabaseKey" placeholder="sb_publishable... hoặc anon key"><br><br>
+          <label>Supabase URL</label><input id="setSupabaseUrl" type="password" autocomplete="off" placeholder="https://xxx.supabase.co"><br><br>
+          <label>Supabase anon / publishable key</label><input id="setSupabaseKey" type="password" autocomplete="off" placeholder="sb_publishable... hoặc anon key"><br><br>
           <label>Setup profile key</label><input id="setSettingsProfile" placeholder="default"><br><br>
           <div class="tools" style="margin-bottom:10px">
             <button class="green" onclick="saveSettingsToCloud()">Lưu setup lên Supabase</button>
             <button class="ghost" onclick="loadSettingsFromCloud()">Load setup từ Supabase</button>
+            <button class="ghost" onclick="toggleSetupKeyVisibility()">Hiện/ẩn key</button>
           </div>
           <div class="tools" style="margin-bottom:10px">
             <button class="ghost" onclick="exportSettingsToClipboard()">Copy setup JSON</button>
             <button class="ghost" onclick="importSettingsFromPrompt()">Import setup JSON</button>
           </div>
-          <div class="note">Không đưa service role key lên GitHub Pages. Muốn dùng ở máy/browser khác: nhập Supabase URL + anon key trước, bấm Load setup từ Supabase để tự kéo các key còn lại.</div>
+          <div class="note">Không đưa service role key lên GitHub Pages. Các key được ẩn trên giao diện và sẽ lưu vào bảng app_settings khi bấm Save settings / Lưu setup lên Supabase. Máy khác chỉ cần có Supabase URL + anon key để Load setup từ database.</div>
         </div>
         <div class="card">
           <h3>Apps Script</h3>
-          <label>Apps Script Web App URL để lấy task queue</label><input id="setSheetApi" placeholder="https://script.google.com/macros/s/.../exec"><br><br>
-          <label>Telegram webhook URL</label><input id="setTelegram" placeholder="https://script.google.com/macros/s/.../exec"><br><br>
-          <label>Tracking Log webhook URL</label><input id="setTrackingWebhook" placeholder="Apps Script Web App URL để lưu log tracking vào Google Sheet"><br><br>
-          <label>Domain Group Telegram Chat ID</label><input id="setDomainGroupChat" placeholder="-100xxxxxxxxxx"><br><br>
+          <label>Apps Script Web App URL để lấy task queue</label><input id="setSheetApi" type="password" autocomplete="off" placeholder="https://script.google.com/macros/s/.../exec"><br><br>
+          <label>Telegram webhook URL</label><input id="setTelegram" type="password" autocomplete="off" placeholder="https://script.google.com/macros/s/.../exec"><br><br>
+          <label>Tracking Log webhook URL</label><input id="setTrackingWebhook" type="password" autocomplete="off" placeholder="Apps Script Web App URL để lưu log tracking vào Google Sheet"><br><br>
+          <label>Domain Group Telegram Chat ID</label><input id="setDomainGroupChat" type="password" autocomplete="off" placeholder="-100xxxxxxxxxx"><br><br>
           <label>Mention trong group domain</label><input id="setDomainMention" placeholder="@lee_web"><br><br>
           <div class="note">Có thể dùng chung Apps Script URL nếu file GAS có cả doGet queue API và doPost Telegram. Domain Group Chat ID là group nhận thông báo tạo domain.</div>
         </div>
@@ -4750,6 +4751,27 @@ function closeModalOnBg(e,id){if(e.target.id===id)closeModal(id)}
 let resendNotifyRows=[];
 let telegramNotifyLogs=[];
 
+function getSetupFieldIds(){
+  return [
+    "setSupabaseUrl","setSupabaseKey","setSheetApi","setTelegram",
+    "setTrackingWebhook","setDomainGroupChat"
+  ];
+}
+
+function setSetupInputsMasked(masked=true){
+  getSetupFieldIds().forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.type=masked?"password":"text";
+  });
+}
+
+function toggleSetupKeyVisibility(){
+  const first=document.getElementById("setSupabaseUrl");
+  const masked=!first || first.type==="password";
+  setSetupInputsMasked(!masked);
+  toast(masked?"Đã hiện key tạm thời":"Đã ẩn key", masked?"#8a6d00":"#2e7d32");
+}
+
 function getSettingsSnapshot(){
   return {
     editCode:settings.editCode||DEFAULTS.editCode,
@@ -4777,6 +4799,7 @@ function applySettingsSnapshot(next={},shouldSave=true){
   if(byId("setDomainGroupChat"))setDomainGroupChat.value=settings.domainGroupChatId||"";
   if(byId("setDomainMention"))setDomainMention.value=settings.domainMention||"@lee_web";
   if(byId("setSettingsProfile"))setSettingsProfile.value=settings.settingsProfile||"default";
+  setSetupInputsMasked(true);
 }
 
 function setupUi(){
@@ -4803,7 +4826,13 @@ async function saveSettings(){
   localStorage.setItem("tm_settings",JSON.stringify(settings));
   initClient();
   toast("Đã lưu setup trên trình duyệt", "#2e7d32");
-  try{await saveSettingsToCloud(false);}catch(e){logDebug("Không lưu cloud setup tự động", e?.message||String(e));}
+  try{
+    await saveSettingsToCloud(false);
+    logDebug("✅ Setup đã tự lưu lên Supabase cloud", {profile:settings.settingsProfile});
+  }catch(e){
+    logDebug("Không lưu cloud setup tự động", e?.message||String(e));
+  }
+  setSetupInputsMasked(true);
   loadMembers();
 }
 
@@ -5078,7 +5107,7 @@ Type: ${type}
 Member: ${person}
 AM: ${am}
 📅 ${taskDate}`;
-  const payload={event:context==="manual_resend"?"resend_assign":"new",context,source_id:sourceId,task_id:task.id||null,project,task_date:taskDate,result:"success",person,am,type,message:msg};
+  const payload={event:"new",context,is_resend:context==="manual_resend",source_id:sourceId,task_id:task.id||null,project,task_date:taskDate,result:"success",person,am,type,message:msg};
   return await sendOneAssignTelegramNotification(payload,webMember,amMember,{context});
 }
 
