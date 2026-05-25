@@ -1664,8 +1664,11 @@ function buildTrackingPayload(action, payload={}){
     timestamp:now.toISOString(),
     date:now.toISOString().slice(0,10),
     month:now.toISOString().slice(0,7),
+    tracking_only:true,
+    mode:"tracking",
     action:action||payload.action||"info",
-    event:payload.event||"",
+    event:"tracking",
+    original_event:payload.event||"",
     result:payload.result||"info",
     source_id:payload.source_id||payload.sourceId||"",
     project:payload.project||payload.text||payload.message_project||"",
@@ -1690,7 +1693,13 @@ function buildTrackingPayload(action, payload={}){
 
 async function sendTrackingLog(action,payload={}){
   if(!settings.trackingWebhook)return {skipped:true};
-  const body=buildTrackingPayload(action,payload);
+  const body={
+    ...buildTrackingPayload(action,payload),
+    tracking_only:true,
+    mode:"tracking",
+    event:"tracking",
+    original_event:payload?.event||""
+  };
   try{
     const res=await fetch(settings.trackingWebhook,{
       method:"POST",
@@ -1757,6 +1766,62 @@ async function sendTelegram(data){
     });
     throw e;
   }
+}
+
+
+async function sendTaskEventTelegram({
+  event,
+  person="",
+  am="",
+  type="",
+  message="",
+  context="calendar_action",
+  source_id="",
+  project="",
+  task_id=null,
+  task_date="",
+  sendWeb=true,
+  sendAm=true
+}){
+  const result={web_sent:0,am_sent:0,web_failed:0,am_failed:0,web_missing:0,am_missing:0};
+  const webMember=sendWeb ? (findMemberLooseByName(person,["WEB","BOTH"])||memberByName(person)) : null;
+  const amMember=sendAm && String(am||"").trim() && String(am||"").trim()!=="None"
+    ? (findMemberLooseByName(am,["AM","BOTH"])||memberByName(am))
+    : null;
+  const webChatId=String(webMember?.telegram_chat_id||"").trim();
+  const amChatId=String(amMember?.telegram_chat_id||"").trim();
+
+  if(sendWeb){
+    if(webChatId){
+      try{
+        await sendTelegram({event,recipient:"web",context,source_id,project,task_id,task_date,person,person_chat_id:webChatId,am,am_chat_id:"",type,message});
+        result.web_sent++;
+      }catch(e){
+        result.web_failed++;
+        logDebug("⚠️ Gửi Telegram Web lỗi",{event,source_id,project,person,chat_id:webChatId,error:e?.message||String(e)});
+      }
+    }else{
+      result.web_missing++;
+      logDebug("⚠️ Thiếu Telegram ID Web",{event,source_id,project,person});
+    }
+  }
+
+  if(sendAm && String(am||"").trim() && String(am||"").trim()!=="None"){
+    if(amChatId){
+      try{
+        await sendTelegram({event,recipient:"am",context,source_id,project,task_id,task_date,person,person_chat_id:"",am,am_chat_id:amChatId,type,message});
+        result.am_sent++;
+      }catch(e){
+        result.am_failed++;
+        logDebug("⚠️ Gửi Telegram AM lỗi",{event,source_id,project,am,chat_id:amChatId,error:e?.message||String(e)});
+      }
+    }else{
+      result.am_missing++;
+      logDebug("⚠️ Thiếu Telegram ID AM",{event,source_id,project,am});
+    }
+  }
+
+  return result;
 }
 
 async function logAction(action,taskId,sourceId,project,person,detail="",am=""){
@@ -4711,27 +4776,31 @@ async function saveTaskFromModal(){
       `Note: ${oldTask.note||""} → ${p.note||""}`
     ].join("\n");
 
-    const newPersonM=memberByName(p.person);
-    const newAmM=memberByName(p.am);
-
-    await sendTelegram({
+    await sendTaskEventTelegram({
       event:"update",
+      context:"task_update",
+      source_id:oldTask.source_id||"",
+      project:p.text||oldTask.text||"",
+      task_id:editingTask.id,
+      task_date:oldTask.task_date||task_date,
       person:p.person,
-      person_chat_id:newPersonM?.telegram_chat_id||"",
       am:p.am,
-      am_chat_id:newAmM?.telegram_chat_id||"",
       type:p.type,
-      message:changeLines
+      message:changeLines,
+      sendWeb:true,
+      sendAm:true
     });
 
     if(oldTask.person && oldTask.person!==p.person){
-      const oldPersonM=memberByName(oldTask.person);
-      await sendTelegram({
+      await sendTaskEventTelegram({
         event:"update",
+        context:"task_reassigned_old_web",
+        source_id:oldTask.source_id||"",
+        project:oldTask.text||"",
+        task_id:editingTask.id,
+        task_date:oldTask.task_date||task_date,
         person:oldTask.person,
-        person_chat_id:oldPersonM?.telegram_chat_id||"",
         am:"",
-        am_chat_id:"",
         type:p.type,
         message:
           `Project: ${oldTask.text||""}
@@ -4743,18 +4812,22 @@ async function saveTaskFromModal(){
 `+
           `New Member: ${p.person}
 `+
-          `Date: ${oldTask.task_date||task_date}`
+          `Date: ${oldTask.task_date||task_date}`,
+        sendWeb:true,
+        sendAm:false
       });
     }
 
     if(oldTask.am && oldTask.am!==p.am){
-      const oldAmM=memberByName(oldTask.am);
-      await sendTelegram({
+      await sendTaskEventTelegram({
         event:"update",
+        context:"task_am_changed_old_am",
+        source_id:oldTask.source_id||"",
+        project:oldTask.text||"",
+        task_id:editingTask.id,
+        task_date:oldTask.task_date||task_date,
         person:p.person,
-        person_chat_id:"",
         am:oldTask.am,
-        am_chat_id:oldAmM?.telegram_chat_id||"",
         type:p.type,
         message:
           `Project: ${oldTask.text||""}
@@ -4768,7 +4841,9 @@ async function saveTaskFromModal(){
 `+
           `Member: ${p.person}
 `+
-          `Date: ${oldTask.task_date||task_date}`
+          `Date: ${oldTask.task_date||task_date}`,
+        sendWeb:false,
+        sendAm:true
       });
     }
 
@@ -4899,16 +4974,19 @@ async function removeTask(id){
     task?.am||""
   );
 
-  const personM=memberByName(task?.person);
-  const amM=memberByName(task?.am);
-
-  await sendTelegram({
+  await sendTaskEventTelegram({
     event:"delete",
+    context:"task_delete",
+    source_id:task?.source_id||"",
+    project:task?.text||"",
+    task_id:id,
+    task_date:task?.task_date||"",
     person:task?.person||"",
-    person_chat_id:personM?.telegram_chat_id||"",
     am:task?.am||"",
-    am_chat_id:amM?.telegram_chat_id||"",
-    message:detailMessage
+    type:task?.type||"",
+    message:detailMessage,
+    sendWeb:true,
+    sendAm:true
   });
 
   toast("Đã xóa task, gửi Telegram và trả về queue","#2e7d32");
@@ -4963,16 +5041,19 @@ async function dropToOtherDay(day){
     dragTask.am
   );
 
-  const personM=memberByName(dragTask.person);
-  const amM=memberByName(dragTask.am);
-
-  await sendTelegram({
+  await sendTaskEventTelegram({
     event:"move",
-    person:dragTask.person,
-    person_chat_id:personM?.telegram_chat_id||"",
-    am:dragTask.am,
-    am_chat_id:amM?.telegram_chat_id||"",
-    message:detailMessage
+    context:"task_move",
+    source_id:dragTask.source_id||"",
+    project:dragTask.text||"",
+    task_id:dragTask.id,
+    task_date:newDate,
+    person:dragTask.person||"",
+    am:dragTask.am||"",
+    type:dragTask.type||"",
+    message:detailMessage,
+    sendWeb:true,
+    sendAm:true
   });
 
   dragTask=null;
