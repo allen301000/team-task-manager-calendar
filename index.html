@@ -1168,6 +1168,23 @@ td .badge.urgent{margin-top:4px}
 
 
 
+<div class="modal" id="assignValidateModal" onclick="closeModalOnBg(event,'assignValidateModal')">
+  <div class="box">
+    <h3>Validate trước khi Assign batch</h3>
+    <div id="assignValidateSummary" class="note" style="margin-bottom:12px">Đang kiểm tra...</div>
+    <div class="wrap" style="max-height:420px;overflow:auto">
+      <table style="min-width:900px">
+        <thead><tr><th>Project</th><th>AM</th><th>Domain</th><th>Dự kiến Web</th><th>Ngày bắt đầu</th><th>Cảnh báo</th></tr></thead>
+        <tbody id="assignValidateBody"></tbody>
+      </table>
+    </div>
+    <div class="actions">
+      <button class="ghost" onclick="closeModal('assignValidateModal')">Cancel</button>
+      <button class="primary" id="assignValidateConfirmBtn" onclick="confirmValidatedAssignBatch()">Confirm assign</button>
+    </div>
+  </div>
+</div>
+
 <div id="queueContextMenu" style="position:fixed;display:none;z-index:200;background:#fff;border:1px solid var(--line);box-shadow:0 12px 30px rgba(0,0,0,.18);border-radius:12px;overflow:hidden;min-width:250px">
   <button style="display:block;width:100%;text-align:left;border-radius:0;background:#fff;padding:10px 12px" onclick="contextAddToCurrentQueue()">➕ Add vào Tiệm mới đủ info</button>
   <button style="display:block;width:100%;text-align:left;border-radius:0;background:#fff;padding:10px 12px" onclick="contextMarkDomainNotified()">✅ Đánh dấu đã báo domain</button>
@@ -4169,7 +4186,155 @@ async function restoreQueueAssigneeFromTasks(skipItems){
   return restored;
 }
 
+
+let pendingAssignValidationPlan=null;
+
+function getSelectedQueueAssignRowsForValidation(){
+  const selectedIds=[...document.querySelectorAll(".queue-domain-check:checked")]
+    .map(cb=>String(cb.value||"").trim())
+    .filter(Boolean);
+
+  let selectedRows=queueRows.filter(r=>selectedIds.includes(String(r.source_id||"").trim()));
+  const skippedByUi=[];
+  selectedRows=selectedRows.filter(r=>{
+    const status=String(r.queue_status||"NEW").trim();
+    const person=String(r.assigned_person||"").trim();
+    const date=String(r.assigned_date||"").trim();
+    const assigned=status==="ASSIGNED"||!!person||!!date;
+    if(assigned)skippedByUi.push(r);
+    return !assigned && status==="NEW";
+  });
+
+  return {selectedIds,selectedRows:sortQueuePriorityThenSheet(selectedRows),skippedByUi};
+}
+
+function nextWorkdayFrom(dateStr){
+  const d=new Date((dateStr||todayStr())+"T00:00:00");
+  while(d.getDay()===0||d.getDay()===6){
+    d.setDate(d.getDate()+1);
+  }
+  return d.toISOString().slice(0,10);
+}
+
+async function buildAssignValidationPlan(selectedRows, skippedByUi=[]){
+  await ensureMembersReadyForNotify();
+  const today=nextWorkdayFrom(todayStr());
+  const sourceIds=[...new Set((selectedRows||[]).map(r=>String(r.source_id||"").trim()).filter(Boolean))];
+  const people=webMembers();
+  const warnings=[];
+  const existingMap=new Map();
+
+  if(sourceIds.length){
+    for(const chunk of chunkList(sourceIds,100)){
+      const {data,error}=await supabaseClient
+        .from("tasks")
+        .select("source_id,text,person,am,task_date")
+        .in("source_id",chunk)
+        .gte("task_date",today);
+      if(error){
+        warnings.push(`Không check được Calendar/tasks: ${error.message}`);
+        continue;
+      }
+      (data||[]).forEach(t=>existingMap.set(String(t.source_id||"").trim(),t));
+    }
+  }
+
+  if(!people.length){
+    warnings.push("Không có Web member Active role WEB/BOTH để auto assign.");
+  }
+
+  const rows=(selectedRows||[]).map((r,idx)=>{
+    const sourceId=String(r.source_id||"").trim();
+    const project=String(r.project||sourceId).trim();
+    const plannedWeb=people.length?people[idx%people.length]:null;
+    const amInfo=resolveAssignAm(r.am||"None",r);
+    const amMember=amInfo.member||findMemberLooseByName(amInfo.name,["AM","BOTH"]);
+    const existing=existingMap.get(sourceId);
+    const rowWarnings=[];
+
+    if(existing)rowWarnings.push(`Đã có Calendar từ hôm nay: ${existing.person||"-"} / ${String(existing.task_date||"").slice(0,10)}`);
+    if(plannedWeb && !String(plannedWeb.telegram_chat_id||"").trim())rowWarnings.push(`Web ${plannedWeb.name} thiếu Telegram ID`);
+    if(!plannedWeb)rowWarnings.push("Không có Web active để nhận task");
+    if(amInfo.name && amInfo.name!=="None" && (!amMember || !String(amMember.telegram_chat_id||"").trim()))rowWarnings.push(`AM ${amInfo.name} thiếu Telegram ID hoặc chưa có trong Members`);
+    if(!r.domain_notified)rowWarnings.push("Chưa báo domain");
+    if(!String(r.domain_url||"").trim())rowWarnings.push("Domain trống / sub");
+
+    return {
+      source_id:sourceId,
+      project,
+      am:amInfo.name||String(r.am||""),
+      domain:String(r.domain_url||"").trim()||"sub",
+      planned_web:plannedWeb?.name||"-",
+      planned_date:today,
+      warnings:rowWarnings
+    };
+  });
+
+  const warningCount=rows.reduce((s,r)=>s+r.warnings.length,0)+warnings.length;
+  return {
+    total_selected:sourceIds.length+skippedByUi.length,
+    valid_count:rows.filter(r=>!r.warnings.some(w=>w.startsWith("Đã có Calendar")||w.includes("Không có Web active"))).length,
+    assign_count:rows.length,
+    skipped_ui_count:skippedByUi.length,
+    warning_count:warningCount,
+    started_from:today,
+    global_warnings:warnings,
+    rows
+  };
+}
+
+function renderAssignValidateModal(plan){
+  pendingAssignValidationPlan=plan;
+  const summary=document.getElementById("assignValidateSummary");
+  const body=document.getElementById("assignValidateBody");
+  const btn=document.getElementById("assignValidateConfirmBtn");
+  if(!summary||!body)return;
+
+  const hardBlock=(plan.global_warnings||[]).some(x=>String(x).includes("Không có Web member"));
+  summary.innerHTML=`
+    <b>Validate từ ngày ${esc(plan.started_from)}</b><br>
+    Đã chọn: <b>${plan.total_selected}</b> • Hợp lệ để gửi RPC: <b>${plan.assign_count}</b> • Bỏ qua do đã assign ở UI: <b>${plan.skipped_ui_count}</b> • Cảnh báo: <b>${plan.warning_count}</b>
+    ${(plan.global_warnings||[]).length?`<br><span class="badge urgent">${esc(plan.global_warnings.join(" • "))}</span>`:""}
+    <div class="report-note">Confirm assign vẫn chạy qua Supabase RPC, database sẽ kiểm tra an toàn lần cuối. Task đã có trong Calendar từ hôm nay sẽ được restore/bỏ qua, không assign trùng.</div>
+  `;
+  body.innerHTML=(plan.rows||[]).map(r=>`<tr>
+    <td><b>${esc(r.project)}</b><br><span class="muted">${esc(r.source_id)}</span></td>
+    <td>${esc(r.am||"")}</td>
+    <td>${esc(r.domain||"")}</td>
+    <td>${esc(r.planned_web||"-")}</td>
+    <td>${esc(r.planned_date||"")}</td>
+    <td>${r.warnings.length?r.warnings.map(w=>`<span class="badge ${w.startsWith("Đã có Calendar")||w.includes("thiếu")||w.includes("Không có")?"urgent":"pending"}" style="margin:2px">${esc(w)}</span>`).join(" "):'<span class="badge assigned">OK</span>'}</td>
+  </tr>`).join("")||'<tr><td colspan="6" class="muted">Không có project hợp lệ</td></tr>';
+  if(btn)btn.disabled=hardBlock||!(plan.rows||[]).length;
+  openModal("assignValidateModal");
+}
+
 async function bulkAssignSelected(){
+  if(!requireDb())return;
+  const {selectedIds,selectedRows,skippedByUi}=getSelectedQueueAssignRowsForValidation();
+  if(!selectedIds.length){toast("Chưa chọn project nào để assign batch", "#8a6d00");return;}
+  if(!selectedRows.length){
+    toast("Các project đã chọn đã assign rồi hoặc không còn trạng thái NEW", "#8a6d00");
+    logDebug("Assign batch bỏ qua ở UI", skippedByUi.map(r=>({source_id:r.source_id,project:r.project,assigned_person:r.assigned_person,assigned_date:r.assigned_date,assigned_month:r.assigned_month,queue_status:r.queue_status})));
+    return;
+  }
+  try{
+    toast("Đang validate trước khi assign...", "#f05a28");
+    const plan=await buildAssignValidationPlan(selectedRows,skippedByUi);
+    renderAssignValidateModal(plan);
+  }catch(e){
+    console.error(e);
+    toast("Lỗi validate: "+(e.message||e), "#b71c1c");
+    logDebug("VALIDATE ASSIGN ERROR", e.message||String(e));
+  }
+}
+
+async function confirmValidatedAssignBatch(){
+  closeModal("assignValidateModal");
+  await runBulkAssignSelectedNow(true);
+}
+
+async function runBulkAssignSelectedNow(skipConfirm=false){
   if(!requireDb())return;
 
   const selectedIds=[...document.querySelectorAll(".queue-domain-check:checked")]
@@ -4210,15 +4375,17 @@ async function bulkAssignSelected(){
 
   selectedRows=sortQueuePriorityThenSheet(selectedRows);
 
-  const ok=confirm(
-    `Assign batch ${selectedRows.length} project bằng Database RPC?\n\n`+
-    `Bước 1: Supabase assign nhanh, không treo trang.\n`+
-    `Bước 2: Web tự gửi Telegram sau khi assign thành công, chia nhỏ để không freeze.\n`+
-    `Auto assign chỉ tính member Active = true, role WEB/BOTH, theo Sort ID.\n`+
-    (skippedByUi.length?`\nĐã bỏ qua ${skippedByUi.length} project đã assign ở UI.`:"")
-  );
+  if(!skipConfirm){
+    const ok=confirm(
+      `Assign batch ${selectedRows.length} project bằng Database RPC?\n\n`+
+      `Bước 1: Supabase assign nhanh, không treo trang.\n`+
+      `Bước 2: Web tự gửi Telegram sau khi assign thành công, chia nhỏ để không freeze.\n`+
+      `Auto assign chỉ tính member Active = true, role WEB/BOTH, theo Sort ID.\n`+
+      (skippedByUi.length?`\nĐã bỏ qua ${skippedByUi.length} project đã assign ở UI.`:"")
+    );
 
-  if(!ok)return;
+    if(!ok)return;
+  }
 
   const startedAt=Date.now();
   const assignBtn=[...document.querySelectorAll("button")].find(b=>String(b.textContent||"").trim()==="Assign batch");
@@ -4941,7 +5108,7 @@ async function renderReport(){
     reportPackageChart.innerHTML=buildCompareChartHtml(packageRows,prevSummary.byPackage,"total");
     const byP=currentSummary.byPerson;
     const ordered=[...new Set([...webMembers().map(m=>m.name),...Object.keys(byP)])];
-    reportByPerson.innerHTML=ordered.map(name=>{const v=byP[name]||{total:0,done:0,pending:0};return `<div style="display:flex;justify-content:space-between;margin:8px 0"><span>${esc(name)}</span><b>${v.total}</b><span class="muted">Done ${v.done} • Pending ${v.pending}</span></div>`}).join("")||'<span class="muted">No data</span>';
+    reportByPerson.innerHTML=`<div class="wrap"><table style="min-width:520px"><thead><tr><th>Member</th><th class="num">Total</th><th class="num">Done</th><th class="num">Pending</th></tr></thead><tbody>${ordered.map(name=>{const v=byP[name]||{total:0,done:0,pending:0};return `<tr><td><b>${esc(name)}</b></td><td class="num"><b>${v.total}</b></td><td class="num">${v.done}</td><td class="num">${v.pending}</td></tr>`}).join("")||'<tr><td colspan="4" class="muted">No data</td></tr>'}</tbody></table></div>`;
   }catch(e){
     console.error(e);
     reportSummaryText.textContent=`Lỗi load report: ${e.message||e}`;
