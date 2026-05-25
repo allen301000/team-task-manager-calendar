@@ -990,15 +990,14 @@ td .badge.urgent{margin-top:4px}
       <div class="top">
         <div>
           <h2>🔍 Project Changed</h2>
-          <div class="sub">Chỉ theo dõi các tiệm bị sửa nội dung cột Project trên Sheet, ví dụ: Project cũ &gt; Project mới.</div>
+          <div class="sub">Chỉ theo dõi các tiệm đã từng có trong Calendar/tasks bị sửa nội dung cột Project trên Sheet.</div>
         </div>
         <div class="tools">
-          <input type="month" id="sheetChangeMonth" style="width:auto">
           <button onclick="loadSheetChangeLogs()">Load changes</button>
         </div>
       </div>
       <div class="kpi-compact-row">
-        <div class="kpi-compact"><div class="label">Tiệm đổi Project</div><div class="value" id="sheetChangeTotal">0</div><div class="hint">Theo tháng đang chọn</div></div>
+        <div class="kpi-compact"><div class="label">Tiệm đổi Project</div><div class="value" id="sheetChangeTotal">0</div><div class="hint">Có trong Calendar bất kỳ tháng nào</div></div>
         <div class="kpi-compact"><div class="label">Cần kiểm tra</div><div class="value" id="sheetChangeProjectCode">0</div><div class="hint">Old Project &gt; New Project</div></div>
       </div>
       <div class="card queue-table-card">
@@ -1007,7 +1006,7 @@ td .badge.urgent{margin-top:4px}
             <h3>Danh sách tiệm sửa Project</h3>
             <div class="muted" id="sheetChangeSummary">Chưa load dữ liệu</div>
           </div>
-          <div class="muted">Log được tạo khi bấm Sync Sheet / sync tự động. Không dùng source ID để thống kê.</div>
+          <div class="muted">Chỉ hiển thị log đổi Project nếu tiệm đó đã từng có task thật trong Calendar.</div>
         </div>
         <div class="wrap">
           <table>
@@ -2828,6 +2827,63 @@ function normalizeShopNameFromProject(project){
     .trim();
 }
 
+
+function normalizeProjectFullForCompare(project){
+  return String(project||"")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^a-z0-9]+/g," ")
+    .trim();
+}
+
+function buildCalendarProjectMatchSet(tasks){
+  const set=new Set();
+  (tasks||[]).forEach(t=>{
+    const text=String(t.text||t.project||"").trim();
+    const sourceId=String(t.source_id||"").trim();
+    [text,sourceId].filter(Boolean).forEach(v=>{
+      const full=normalizeProjectFullForCompare(v);
+      const shop=normalizeShopNameFromProject(v);
+      if(full)set.add("full:"+full);
+      if(shop)set.add("shop:"+shop);
+    });
+  });
+  return set;
+}
+
+function sheetProjectChangeMatchesCalendar(row,calendarSet){
+  if(!calendarSet||!calendarSet.size)return false;
+  const values=[row.old_project,row.new_project,row.old_value,row.new_value].filter(Boolean);
+  return values.some(v=>{
+    const full=normalizeProjectFullForCompare(v);
+    const shop=normalizeShopNameFromProject(v);
+    return (full&&calendarSet.has("full:"+full)) || (shop&&calendarSet.has("shop:"+shop));
+  });
+}
+
+async function fetchCalendarTasksForSheetChangeAll(){
+  // Rule mới: miễn project đã từng có trong Calendar/tasks là sẽ được check.
+  // Không giới hạn theo tháng Calendar nữa.
+  const all=[];
+  let from=0;
+  const pageSize=1000;
+  while(true){
+    const {data,error}=await supabaseClient
+      .from("tasks")
+      .select("id,source_id,text,task_date")
+      .order("task_date",{ascending:false})
+      .range(from,from+pageSize-1);
+    if(error)throw error;
+    const rows=data||[];
+    all.push(...rows);
+    if(rows.length<pageSize)break;
+    from+=pageSize;
+    if(from>20000)break;
+  }
+  return all;
+}
+
 function normalizeCompareValue(v){
   return String(v ?? "").trim().replace(/\s+/g," ");
 }
@@ -2904,29 +2960,38 @@ async function detectSheetChangesBeforeUpsert(payload, nowIso){
 
 async function loadSheetChangeLogs(){
   if(!requireDb())return;
-  const month=(document.getElementById("sheetChangeMonth")?.value)||`${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,"0")}`;
-  if(document.getElementById("sheetChangeMonth")&&!sheetChangeMonth.value)sheetChangeMonth.value=month;
   try{
-    const {data,error}=await supabaseClient
-      .from("sheet_change_logs")
-      .select("*")
-      .eq("change_month",month)
-      .in("change_type",["project_changed","project_code_changed"])
-      .order("change_time",{ascending:false})
-      .limit(500);
-    if(error)throw error;
-    renderSheetChangeLogs(data||[],month);
+    if(document.getElementById("sheetChangeSummary"))sheetChangeSummary.textContent="Đang lọc các tiệm đổi Project có trong Calendar...";
+
+    const [logRes,calendarTasks]=await Promise.all([
+      supabaseClient
+        .from("sheet_change_logs")
+        .select("*")
+        .in("change_type",["project_changed","project_code_changed"])
+        .order("change_time",{ascending:false})
+        .limit(5000),
+      fetchCalendarTasksForSheetChangeAll()
+    ]);
+
+    if(logRes.error)throw logRes.error;
+
+    const calendarSet=buildCalendarProjectMatchSet(calendarTasks||[]);
+    const allLogs=logRes.data||[];
+    const matchedLogs=allLogs.filter(r=>sheetProjectChangeMatchesCalendar(r,calendarSet));
+    renderSheetChangeLogs(matchedLogs,"all",{totalLogs:allLogs.length,calendarTasks:(calendarTasks||[]).length});
   }catch(e){
     if(document.getElementById("sheetChangeSummary"))sheetChangeSummary.textContent="Lỗi load sheet_change_logs: "+(e.message||e);
     if(document.getElementById("sheetChangeBody"))sheetChangeBody.innerHTML='<tr><td colspan="5" class="muted">Chưa có bảng sheet_change_logs hoặc lỗi load. Hãy chạy SQL patch.</td></tr>';
   }
 }
 
-function renderSheetChangeLogs(rows,month){
+function renderSheetChangeLogs(rows,month,meta={}){
   const projectRows=(rows||[]).filter(r=>r.change_type==="project_changed"||r.change_type==="project_code_changed");
   if(document.getElementById("sheetChangeTotal"))sheetChangeTotal.textContent=projectRows.length;
   if(document.getElementById("sheetChangeProjectCode"))sheetChangeProjectCode.textContent=projectRows.length;
-  if(document.getElementById("sheetChangeSummary"))sheetChangeSummary.textContent=`Tháng ${month}: ${projectRows.length} tiệm có thay đổi trong cột Project`;
+  if(document.getElementById("sheetChangeSummary")){
+    sheetChangeSummary.textContent=`${projectRows.length} tiệm đổi Project có trong Calendar • Calendar ${meta.calendarTasks||0} task • Tổng log đổi Project ${meta.totalLogs||projectRows.length}`;
+  }
   if(!document.getElementById("sheetChangeBody"))return;
   sheetChangeBody.innerHTML=projectRows.map(r=>`<tr>
     <td>${esc(new Date(r.change_time||Date.now()).toLocaleString())}</td>
@@ -2934,7 +2999,7 @@ function renderSheetChangeLogs(rows,month){
     <td>${esc(r.old_project||r.old_value||"")}</td>
     <td style="text-align:center;font-weight:900;color:#f05a28">&gt;</td>
     <td><b>${esc(r.new_project||r.new_value||"")}</b></td>
-  </tr>`).join("")||'<tr><td colspan="5" class="muted">Chưa có tiệm nào đổi Project trong tháng này</td></tr>';
+  </tr>`).join("")||'<tr><td colspan="5" class="muted">Chưa có tiệm nào có trong Calendar bị đổi Project</td></tr>';
 }
 
 
