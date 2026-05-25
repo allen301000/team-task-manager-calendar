@@ -669,7 +669,7 @@ td .badge.urgent{margin-top:4px}
 
   
   .report-toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-  .report-grid-kpi{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:12px;margin-bottom:12px}
+  .report-grid-kpi{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:12px;margin-bottom:12px}
   .report-grid-wide{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .report-table th,.report-table td{padding:8px 10px;border-bottom:1px solid #eee;font-size:13px;vertical-align:top}
   .report-table td.num,.report-table th.num{text-align:right}
@@ -685,7 +685,6 @@ td .badge.urgent{margin-top:4px}
   .chart-bar-fill{height:100%;border-radius:999px}
   .chart-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#666;margin-bottom:8px}
   .legend-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
-  .report-note{font-size:12px;color:#666;margin-top:6px}
   .compare-pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#f5f5f5;font-size:12px;margin-left:6px}
   @media(max-width:1100px){.report-grid-kpi{grid-template-columns:1fr 1fr}.report-grid-wide{grid-template-columns:1fr}.chart-row{grid-template-columns:1fr}}
 
@@ -841,7 +840,7 @@ td .badge.urgent{margin-top:4px}
 
     <section id="page-report" class="hidden">
       <div class="top">
-        <div><h2>📊 Report</h2><div class="sub">Thống kê theo tháng, số gói và so sánh với tháng trước.</div></div>
+        <div><h2>📊 Report</h2><div class="sub">Thống kê theo tháng, theo Task Name / Gói và so sánh tháng trước.</div></div>
         <div class="report-toolbar">
           <input type="month" id="reportMonth" onchange="renderReport()" style="width:auto">
           <button onclick="renderReport()">Refresh</button>
@@ -850,8 +849,8 @@ td .badge.urgent{margin-top:4px}
       <div class="report-grid-kpi">
         <div class="card kpi"><span class="label">Tổng web</span><span class="value" id="reportTotal">0</span><div class="muted" id="reportTotalDelta">So với tháng trước: 0</div></div>
         <div class="card kpi"><span class="label">Hoàn thành</span><span class="value" id="reportDone">0</span><div class="muted" id="reportDoneDelta">Tỷ lệ: 0%</div></div>
-        <div class="card kpi"><span class="label">Pending</span><span class="value" id="reportPending">0</span><div class="muted" id="reportPendingDelta">Chưa hoàn thành</div></div>
-        <div class="card kpi"><span class="label">% hoàn thành</span><span class="value" id="reportDoneRate">0%</span><div class="muted" id="reportDoneRateDelta">So với tháng trước</div></div>
+        <div class="card kpi"><span class="label">Pending</span><span class="value" id="reportPending">0</span><div class="muted" id="reportPendingDelta">Pending tháng trước: 0</div></div>
+        <div class="card kpi"><span class="label">% hoàn thành</span><span class="value" id="reportDoneRate">0%</span><div class="muted" id="reportDoneRateDelta">Tháng trước: 0%</div></div>
       </div>
       <div class="grid two" style="margin-bottom:12px">
         <div class="card"><h3>Tổng quan tháng</h3><div id="reportSummaryText" class="muted">Đang tải...</div></div>
@@ -873,7 +872,7 @@ td .badge.urgent{margin-top:4px}
       </div>
       <div class="grid two" style="margin-top:12px">
         <div class="card"><h3>Theo member</h3><div id="reportByPerson"></div></div>
-        <div class="card"><h3>Ghi chú</h3><div class="muted">Report này chỉ tính theo số lượng task trong Calendar/tasks của tháng đã chọn. Không tính TB phút, đúng hạn hoặc trễ.</div></div>
+        <div class="card"><h3>Ghi chú</h3><div class="muted">Report này chỉ tính Tổng web, Hoàn thành, Pending và % hoàn thành. Không tính TB phút, Đúng hạn, Trễ.</div></div>
       </div>
     </section>
 
@@ -1220,7 +1219,7 @@ if(!String(settings.settingsProfile||"").trim()&&String(BOOTSTRAP_CONFIG.setting
   settings.settingsProfile=BOOTSTRAP_CONFIG.settingsProfile.trim();
 }
 let supabaseClient=null,current=new Date(),cache={},queueRows=[],members=[],auditLogs=[];
-let reportDataCache={month:"",loading:false,currentTasks:[],prevTasks:[],doneLogs:[]};
+let reportDataCache={month:"",loading:false,currentTasks:[],prevTasks:[]};
 let selectedQueue=null,selectedDay=null,editingTask=null,editingMember=null,dragTask=null,dragFromDay=null,dragFromIndex=null,contextQueueSourceId=null;
 let queueRenderToken=0;
 let canEdit=localStorage.getItem("tm_canEdit")==="1";
@@ -4832,7 +4831,7 @@ function getMonthRange(month){
   const start=new Date(y,m-1,1);
   const endExclusive=new Date(y,m,1);
   const fmt=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-  return {start,endExclusive,startStr:fmt(start),endExclusiveStr:fmt(endExclusive)};
+  return {startStr:fmt(start),endExclusiveStr:fmt(endExclusive)};
 }
 
 function formatMonthHuman(month){
@@ -4840,18 +4839,16 @@ function formatMonthHuman(month){
   return new Date(y,m-1,1).toLocaleString("vi-VN",{month:"long",year:"numeric"});
 }
 
-function pct(n,d){
-  return d?`${((n*100)/d).toFixed(1)}%`:'0.0%';
-}
+function pct(n,d){return d?`${((n*100)/d).toFixed(1)}%`:"0.0%";}
 
 function formatDelta(n){
   const val=Number(n||0);
-  const cls=val>0?'delta-up':val<0?'delta-down':'delta-flat';
-  const sign=val>0?'+':'';
+  const cls=val>0?"delta-up":val<0?"delta-down":"delta-flat";
+  const sign=val>0?"+":"";
   return `<span class="${cls}">${sign}${esc(String(val))}</span>`;
 }
 
-async function fetchTasksForMonth(month){
+async function fetchTasksForReportMonth(month){
   const range=getMonthRange(month);
   const {data,error}=await supabaseClient
     .from("tasks")
@@ -4871,31 +4868,32 @@ function summarizeTasksForReport(tasks){
   const byPackage=new Map();
   const byPerson={};
   const totals={total:0,done:0,pending:0};
-  const ensure=(map,key)=>{if(!map.has(key))map.set(key,{name:key,total:0,done:0,pending:0});return map.get(key)};
+  const ensure=(map,key)=>{if(!map.has(key))map.set(key,{name:key,total:0,done:0,pending:0});return map.get(key);};
   (tasks||[]).forEach(t=>{
     const project=String(t.text||t.project||t.source_id||"").trim();
     const type=String(t.type||pickAssignTypeFromProject(project)||"Design").trim();
     const pkg=String(t.package_name||pkgFromProject(project)||"Gói Custom").trim();
     const person=String(t.person||"").trim()||"(Chưa assign)";
     const done=!!t.done;
-    [ensure(byType,type),ensure(byPackage,pkg)].forEach(b=>{b.total++; if(done)b.done++; else b.pending++;});
-    totals.total++; if(done)totals.done++; else totals.pending++;
+    [ensure(byType,type),ensure(byPackage,pkg)].forEach(b=>{b.total++;done?b.done++:b.pending++;});
+    totals.total++; done?totals.done++:totals.pending++;
     if(!byPerson[person])byPerson[person]={total:0,done:0,pending:0};
-    byPerson[person].total++; if(done)byPerson[person].done++; else byPerson[person].pending++;
+    byPerson[person].total++; done?byPerson[person].done++:byPerson[person].pending++;
   });
   typeOrder.forEach(k=>ensure(byType,k));
   packageOrder.forEach(k=>ensure(byPackage,k));
-  return {
-    totals,
-    byType:[...byType.values()].sort((a,b)=>(typeOrder.indexOf(a.name)-typeOrder.indexOf(b.name))||a.name.localeCompare(b.name)),
-    byPackage:[...byPackage.values()].sort((a,b)=>(packageOrder.indexOf(a.name)-packageOrder.indexOf(b.name))||a.name.localeCompare(b.name)),
-    byPerson
+  const orderSort=(order)=>(a,b)=>{
+    const ai=order.indexOf(a.name), bi=order.indexOf(b.name);
+    const av=ai===-1?999:ai, bv=bi===-1?999:bi;
+    if(av!==bv)return av-bv;
+    return a.name.localeCompare(b.name);
   };
+  return {totals,byType:[...byType.values()].sort(orderSort(typeOrder)),byPackage:[...byPackage.values()].sort(orderSort(packageOrder)),byPerson};
 }
 
 function mergeCurrentPrevRows(currentRows, prevRows){
   const prevMap=new Map((prevRows||[]).map(r=>[r.name,r]));
-  return (currentRows||[]).map(r=>{const prev=prevMap.get(r.name)||{total:0,done:0,pending:0};return {...r,prevTotal:prev.total||0,deltaTotal:(r.total||0)-(prev.total||0)}});
+  return (currentRows||[]).map(r=>{const prev=prevMap.get(r.name)||{total:0,done:0,pending:0};return {...r,prevTotal:prev.total||0,deltaTotal:(r.total||0)-(prev.total||0)};});
 }
 
 function buildCompareChartHtml(rows, prevRows, mode="total"){
@@ -4907,25 +4905,24 @@ function buildCompareChartHtml(rows, prevRows, mode="total"){
 async function loadReportData(month){
   const prevMonth=getPrevMonthValue(month);
   reportDataCache={month,loading:true,currentTasks:[],prevTasks:[]};
-  const [currentTasks,prevTasks]=await Promise.all([fetchTasksForMonth(month),fetchTasksForMonth(prevMonth)]);
+  const [currentTasks,prevTasks]=await Promise.all([fetchTasksForReportMonth(month),fetchTasksForReportMonth(prevMonth)]);
   reportDataCache={month,loading:false,currentTasks,prevTasks};
   return reportDataCache;
 }
 
 async function renderReport(){
   if(!requireDb())return;
-  if(document.getElementById("reportMonth")&&!reportMonth.value){reportMonth.value=getCurrentReportMonth();}
+  if(document.getElementById("reportMonth")&&!reportMonth.value)reportMonth.value=getCurrentReportMonth();
   const month=getCurrentReportMonth();
   const prevMonth=getPrevMonthValue(month);
   reportSummaryText.textContent=`Đang tải report tháng ${month}...`;
   reportPrevSummary.textContent=`Đang tải dữ liệu tháng trước ${prevMonth}...`;
   try{
-    const data=(reportDataCache.month===month&&!reportDataCache.loading&&reportDataCache.currentTasks.length)?reportDataCache:await loadReportData(month);
+    const data=(reportDataCache.month===month&&!reportDataCache.loading)?reportDataCache:await loadReportData(month);
     const currentSummary=summarizeTasksForReport(data.currentTasks||[]);
     const prevSummary=summarizeTasksForReport(data.prevTasks||[]);
     const totals=currentSummary.totals, prevTotals=prevSummary.totals;
-    const doneRate=pct(totals.done,totals.total);
-    const prevDoneRate=pct(prevTotals.done,prevTotals.total);
+    const doneRate=pct(totals.done,totals.total), prevDoneRate=pct(prevTotals.done,prevTotals.total);
     reportTotal.textContent=totals.total;
     reportDone.textContent=totals.done;
     reportPending.textContent=totals.pending;
@@ -4952,6 +4949,68 @@ async function renderReport(){
     if(document.getElementById("reportTypeBody"))reportTypeBody.innerHTML='<tr><td colspan="7" class="muted">Lỗi tải dữ liệu</td></tr>';
     if(document.getElementById("reportPackageBody"))reportPackageBody.innerHTML='<tr><td colspan="7" class="muted">Lỗi tải dữ liệu</td></tr>';
   }
+}
+function openModal(id){document.getElementById(id).classList.add("open")}
+function closeModal(id){document.getElementById(id).classList.remove("open")}
+function closeModalOnBg(e,id){if(e.target.id===id)closeModal(id)}
+
+
+/* ===== Telegram resend + notification log + cloud setup patch ===== */
+let resendNotifyRows=[];
+let telegramNotifyLogs=[];
+
+function setupSecretInputs(){
+  document.querySelectorAll("#page-setup input.setup-secret").forEach(input=>{
+    input.type="password";
+    input.autocomplete="new-password";
+    input.spellcheck=false;
+  });
+  const btn=document.getElementById("setupSecretToggleBtn");
+  if(btn)btn.textContent="👁️ Hiện key";
+}
+
+function hideSetupSecrets(){
+  setupSecretInputs();
+  toast("Đã ẩn toàn bộ key trong Setup", "#2e7d32");
+}
+
+function toggleSetupSecrets(){
+  const inputs=[...document.querySelectorAll("#page-setup input.setup-secret")];
+  if(!inputs.length)return;
+  const shouldShow=inputs.some(input=>input.type==="password");
+  inputs.forEach(input=>input.type=shouldShow?"text":"password");
+  const btn=document.getElementById("setupSecretToggleBtn");
+  if(btn)btn.textContent=shouldShow?"🙈 Ẩn key":"👁️ Hiện key";
+}
+
+function getSettingsSnapshot(){
+  return {
+    editCode:settings.editCode||DEFAULTS.editCode,
+    supabaseUrl:settings.supabaseUrl||"",
+    supabaseKey:settings.supabaseKey||"",
+    sheetApi:settings.sheetApi||"",
+    telegramWebhook:settings.telegramWebhook||"",
+    trackingWebhook:settings.trackingWebhook||"",
+    domainGroupChatId:settings.domainGroupChatId||"",
+    domainMention:settings.domainMention||"@lee_web",
+    settingsProfile:settings.settingsProfile||"default"
+  };
+}
+
+function applySettingsSnapshot(next={},shouldSave=true){
+  settings={...settings,...next};
+  if(shouldSave)localStorage.setItem("tm_settings",JSON.stringify(settings));
+  initClient();
+  const byId=id=>document.getElementById(id);
+  if(byId("setSupabaseUrl"))setSupabaseUrl.value=settings.supabaseUrl||"";
+  if(byId("setSupabaseKey"))setSupabaseKey.value=settings.supabaseKey||"";
+  if(byId("setSheetApi"))setSheetApi.value=settings.sheetApi||"";
+  if(byId("setTelegram"))setTelegram.value=settings.telegramWebhook||"";
+  if(byId("setTrackingWebhook"))setTrackingWebhook.value=settings.trackingWebhook||"";
+  if(byId("setDomainGroupChat"))setDomainGroupChat.value=settings.domainGroupChatId||"";
+  if(byId("setDomainMention"))setDomainMention.value=settings.domainMention||"@lee_web";
+  if(byId("setSettingsProfile"))setSettingsProfile.value=settings.settingsProfile||"default";
+  setupSecretInputs();
 }
 
 function setupUi(){
