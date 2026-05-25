@@ -717,6 +717,7 @@ td .badge.urgent{margin-top:4px}
       <button data-page="report">📊 Report</button>
       <button data-page="members">👤 Members / AM</button>
       <button data-page="logs">🧾 Audit Logs</button>
+      <button data-page="sheet_changes">🔍 Sheet Changes</button>
       <button data-page="telegram_notify">📣 Gửi lại Tele</button>
       <button data-page="setup">⚙️ Setup</button>
     </div>
@@ -984,6 +985,38 @@ td .badge.urgent{margin-top:4px}
       </div>
     </section>
 
+
+    <section id="page-sheet_changes" class="hidden">
+      <div class="top">
+        <div>
+          <h2>🔍 Project Changed</h2>
+          <div class="sub">Chỉ theo dõi các tiệm bị sửa nội dung cột Project trên Sheet, ví dụ: Project cũ &gt; Project mới.</div>
+        </div>
+        <div class="tools">
+          <input type="month" id="sheetChangeMonth" style="width:auto">
+          <button onclick="loadSheetChangeLogs()">Load changes</button>
+        </div>
+      </div>
+      <div class="kpi-compact-row">
+        <div class="kpi-compact"><div class="label">Tiệm đổi Project</div><div class="value" id="sheetChangeTotal">0</div><div class="hint">Theo tháng đang chọn</div></div>
+        <div class="kpi-compact"><div class="label">Cần kiểm tra</div><div class="value" id="sheetChangeProjectCode">0</div><div class="hint">Old Project &gt; New Project</div></div>
+      </div>
+      <div class="card queue-table-card">
+        <div class="queue-section-title">
+          <div>
+            <h3>Danh sách tiệm sửa Project</h3>
+            <div class="muted" id="sheetChangeSummary">Chưa load dữ liệu</div>
+          </div>
+          <div class="muted">Log được tạo khi bấm Sync Sheet / sync tự động. Không dùng source ID để thống kê.</div>
+        </div>
+        <div class="wrap">
+          <table>
+            <thead><tr><th>Time</th><th>Source row</th><th>Project cũ</th><th></th><th>Project mới</th></tr></thead>
+            <tbody id="sheetChangeBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
 
     <section id="page-telegram_notify" class="hidden">
       <div class="top">
@@ -1547,7 +1580,7 @@ function setQueueMenuFilter(value){
   document.querySelectorAll(".nav button").forEach(btn=>{
     if(!btn.dataset.queueFilter)btn.classList.toggle("active",btn.dataset.page==="queue");
   });
-  ["queue","domain_report","calendar","workload","report","members","logs","setup"].forEach(p=>document.getElementById(`page-${p}`).classList.toggle("hidden",p!=="queue"));
+  ["queue","domain_report","calendar","workload","report","members","logs","sheet_changes","setup"].forEach(p=>document.getElementById(`page-${p}`).classList.toggle("hidden",p!=="queue"));
   loadQueue();
 }
 
@@ -1604,6 +1637,7 @@ function setupUi(){
   if(document.getElementById("workloadDate"))workloadDate.value=todayStr();
   if(document.getElementById("resendNotifyDate")&&!resendNotifyDate.value)resendNotifyDate.value=todayStr();
   if(document.getElementById("domainReportMonth")&&!domainReportMonth.value)domainReportMonth.value=`${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,"0")}`;
+  if(document.getElementById("sheetChangeMonth")&&!sheetChangeMonth.value)sheetChangeMonth.value=`${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,"0")}`;
   setSupabaseUrl.value=settings.supabaseUrl||"";
   setSupabaseKey.value=settings.supabaseKey||"";
   if(document.getElementById("setSettingsProfile"))setSettingsProfile.value=settings.settingsProfile||"default";
@@ -1642,7 +1676,7 @@ function showPage(page){
 
   if(page!=="queue")document.querySelectorAll(".nav [data-queue-filter]").forEach(btn=>btn.classList.remove("active"));
 
-  ["queue","domain_report","calendar","workload","report","members","logs","setup"].forEach(p=>{
+  ["queue","domain_report","calendar","workload","report","members","logs","sheet_changes","setup"].forEach(p=>{
     const el=document.getElementById(`page-${p}`);
     if(el)el.classList.toggle("hidden",p!==page);
   });
@@ -1664,11 +1698,8 @@ function buildTrackingPayload(action, payload={}){
     timestamp:now.toISOString(),
     date:now.toISOString().slice(0,10),
     month:now.toISOString().slice(0,7),
-    tracking_only:true,
-    mode:"tracking",
     action:action||payload.action||"info",
-    event:"tracking",
-    original_event:payload.event||"",
+    event:payload.event||"",
     result:payload.result||"info",
     source_id:payload.source_id||payload.sourceId||"",
     project:payload.project||payload.text||payload.message_project||"",
@@ -1693,13 +1724,7 @@ function buildTrackingPayload(action, payload={}){
 
 async function sendTrackingLog(action,payload={}){
   if(!settings.trackingWebhook)return {skipped:true};
-  const body={
-    ...buildTrackingPayload(action,payload),
-    tracking_only:true,
-    mode:"tracking",
-    event:"tracking",
-    original_event:payload?.event||""
-  };
+  const body=buildTrackingPayload(action,payload);
   try{
     const res=await fetch(settings.trackingWebhook,{
       method:"POST",
@@ -1766,62 +1791,6 @@ async function sendTelegram(data){
     });
     throw e;
   }
-}
-
-
-async function sendTaskEventTelegram({
-  event,
-  person="",
-  am="",
-  type="",
-  message="",
-  context="calendar_action",
-  source_id="",
-  project="",
-  task_id=null,
-  task_date="",
-  sendWeb=true,
-  sendAm=true
-}){
-  const result={web_sent:0,am_sent:0,web_failed:0,am_failed:0,web_missing:0,am_missing:0};
-  const webMember=sendWeb ? (findMemberLooseByName(person,["WEB","BOTH"])||memberByName(person)) : null;
-  const amMember=sendAm && String(am||"").trim() && String(am||"").trim()!=="None"
-    ? (findMemberLooseByName(am,["AM","BOTH"])||memberByName(am))
-    : null;
-  const webChatId=String(webMember?.telegram_chat_id||"").trim();
-  const amChatId=String(amMember?.telegram_chat_id||"").trim();
-
-  if(sendWeb){
-    if(webChatId){
-      try{
-        await sendTelegram({event,recipient:"web",context,source_id,project,task_id,task_date,person,person_chat_id:webChatId,am,am_chat_id:"",type,message});
-        result.web_sent++;
-      }catch(e){
-        result.web_failed++;
-        logDebug("⚠️ Gửi Telegram Web lỗi",{event,source_id,project,person,chat_id:webChatId,error:e?.message||String(e)});
-      }
-    }else{
-      result.web_missing++;
-      logDebug("⚠️ Thiếu Telegram ID Web",{event,source_id,project,person});
-    }
-  }
-
-  if(sendAm && String(am||"").trim() && String(am||"").trim()!=="None"){
-    if(amChatId){
-      try{
-        await sendTelegram({event,recipient:"am",context,source_id,project,task_id,task_date,person,person_chat_id:"",am,am_chat_id:amChatId,type,message});
-        result.am_sent++;
-      }catch(e){
-        result.am_failed++;
-        logDebug("⚠️ Gửi Telegram AM lỗi",{event,source_id,project,am,chat_id:amChatId,error:e?.message||String(e)});
-      }
-    }else{
-      result.am_missing++;
-      logDebug("⚠️ Thiếu Telegram ID AM",{event,source_id,project,am});
-    }
-  }
-
-  return result;
 }
 
 async function logAction(action,taskId,sourceId,project,person,detail="",am=""){
@@ -2841,6 +2810,134 @@ async function patchOldQueueDomainPackage(){
   }
 }
 
+
+function normalizeProjectMainCode(project){
+  const text=String(project||"").trim().toUpperCase();
+  const m=text.match(/^([A-Z0-9*]+)\s+(PROX\d|PROC\d|PRO\d|PR\w+)?/i);
+  return m ? m[1] : (text.split(/\s+/)[0]||"");
+}
+
+function normalizeShopNameFromProject(project){
+  return String(project||"")
+    .replace(/^\s*[A-Z0-9*]+\s*/i,"")
+    .replace(/^\s*(PROX\d|PROC\d|PRO\d)\s*/i,"")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^a-z0-9]+/g," ")
+    .trim();
+}
+
+function normalizeCompareValue(v){
+  return String(v ?? "").trim().replace(/\s+/g," ");
+}
+
+function buildSheetProjectChangeLog(oldRow,newRow,nowIso){
+  return {
+    change_time:nowIso,
+    change_month:String(nowIso).slice(0,7),
+    change_type:"project_changed",
+    field_name:"project",
+    old_source_id:null,
+    new_source_id:null,
+    source_row:newRow?.source_row||oldRow?.source_row||null,
+    old_project:oldRow?.project||null,
+    new_project:newRow?.project||null,
+    old_value:oldRow?.project==null?null:String(oldRow.project),
+    new_value:newRow?.project==null?null:String(newRow.project),
+    payload:{old_project:oldRow?.project||null,new_project:newRow?.project||null,source_row:newRow?.source_row||oldRow?.source_row||null}
+  };
+}
+
+async function detectSheetChangesBeforeUpsert(payload, nowIso){
+  // Rule mới: chỉ thống kê tiệm có thay đổi nội dung cột Project.
+  // Không dùng source_id để tính, vì source_id sẽ đổi theo project.
+  // Match dựa trên source_row của Sheet: cùng dòng, Project cũ khác Project mới.
+  if(!supabaseClient||!payload||!payload.length)return {logged:0,projectChanged:0,projectCodeChanged:0};
+  try{
+    const {data:oldRows,error}=await supabaseClient
+      .from("task_queue")
+      .select("source_row,project,updated_at");
+    if(error)throw error;
+
+    const byRow=new Map();
+    (oldRows||[]).forEach(r=>{
+      const key=String(r.source_row||"").trim();
+      if(!key)return;
+      const old=byRow.get(key);
+      if(!old || String(r.updated_at||"")>String(old.updated_at||""))byRow.set(key,r);
+    });
+
+    const logs=[];
+    for(const row of payload){
+      const rowKey=String(row.source_row||"").trim();
+      if(!rowKey)continue;
+      const old=byRow.get(rowKey);
+      if(!old)continue;
+      const oldProject=normalizeCompareValue(old.project);
+      const newProject=normalizeCompareValue(row.project);
+      if(oldProject && newProject && oldProject!==newProject){
+        logs.push(buildSheetProjectChangeLog(old,row,nowIso));
+      }
+    }
+
+    if(!logs.length)return {logged:0,projectChanged:0,projectCodeChanged:0};
+
+    let inserted=0;
+    for(const chunk of chunkList(logs,200)){
+      const {error:insErr}=await supabaseClient.from("sheet_change_logs").insert(chunk);
+      if(insErr){
+        logDebug("⚠️ Không ghi được sheet_change_logs. Hãy chạy SQL tạo bảng.",insErr.message);
+        return {logged:inserted,error:insErr.message,projectChanged:logs.length,projectCodeChanged:logs.length};
+      }
+      inserted+=chunk.length;
+    }
+
+    logDebug("Project changes detected",{logged:inserted,projectChanged:logs.length});
+    toast(`Phát hiện ${logs.length} tiệm đổi Project trên Sheet`,"#8a6d00");
+    return {logged:inserted,projectChanged:logs.length,projectCodeChanged:logs.length};
+  }catch(e){
+    logDebug("Sheet project change detect skipped",e.message||String(e));
+    return {logged:0,error:e.message||String(e),projectChanged:0,projectCodeChanged:0};
+  }
+}
+
+async function loadSheetChangeLogs(){
+  if(!requireDb())return;
+  const month=(document.getElementById("sheetChangeMonth")?.value)||`${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,"0")}`;
+  if(document.getElementById("sheetChangeMonth")&&!sheetChangeMonth.value)sheetChangeMonth.value=month;
+  try{
+    const {data,error}=await supabaseClient
+      .from("sheet_change_logs")
+      .select("*")
+      .eq("change_month",month)
+      .in("change_type",["project_changed","project_code_changed"])
+      .order("change_time",{ascending:false})
+      .limit(500);
+    if(error)throw error;
+    renderSheetChangeLogs(data||[],month);
+  }catch(e){
+    if(document.getElementById("sheetChangeSummary"))sheetChangeSummary.textContent="Lỗi load sheet_change_logs: "+(e.message||e);
+    if(document.getElementById("sheetChangeBody"))sheetChangeBody.innerHTML='<tr><td colspan="5" class="muted">Chưa có bảng sheet_change_logs hoặc lỗi load. Hãy chạy SQL patch.</td></tr>';
+  }
+}
+
+function renderSheetChangeLogs(rows,month){
+  const projectRows=(rows||[]).filter(r=>r.change_type==="project_changed"||r.change_type==="project_code_changed");
+  if(document.getElementById("sheetChangeTotal"))sheetChangeTotal.textContent=projectRows.length;
+  if(document.getElementById("sheetChangeProjectCode"))sheetChangeProjectCode.textContent=projectRows.length;
+  if(document.getElementById("sheetChangeSummary"))sheetChangeSummary.textContent=`Tháng ${month}: ${projectRows.length} tiệm có thay đổi trong cột Project`;
+  if(!document.getElementById("sheetChangeBody"))return;
+  sheetChangeBody.innerHTML=projectRows.map(r=>`<tr>
+    <td>${esc(new Date(r.change_time||Date.now()).toLocaleString())}</td>
+    <td>${esc(r.source_row||"")}</td>
+    <td>${esc(r.old_project||r.old_value||"")}</td>
+    <td style="text-align:center;font-weight:900;color:#f05a28">&gt;</td>
+    <td><b>${esc(r.new_project||r.new_value||"")}</b></td>
+  </tr>`).join("")||'<tr><td colspan="5" class="muted">Chưa có tiệm nào đổi Project trong tháng này</td></tr>';
+}
+
+
 async function syncQueueFromApi(){
   clearDebug();
   console.group("[Task Queue] Sync Full Sheet");
@@ -2929,6 +3026,7 @@ async function syncQueueFromApi(){
       return;
     }
 
+    const sheetChangeResult=await detectSheetChangesBeforeUpsert(payload,nowIso);
     const totalUpserted=await upsertTaskQueueInChunks(payload,500);
 
     // Giữ lại các tiệm được add thủ công vào "Tiệm mới đủ info" dù sync Sheet không còn đủ filter.
@@ -2949,7 +3047,7 @@ async function syncQueueFromApi(){
     queueStatusFilter.value="CURRENT";
 
     const currentCount=useAllProjectsAsCurrent ? payload.length : currentIds.size;
-    toast(`Đã sync ${payload.length} project từ Sheet, trong đó ${currentCount} tiệm mới đủ info`,"#2e7d32");
+    toast(`Đã sync ${payload.length} project từ Sheet, current ${currentCount}. Log thay đổi: ${sheetChangeResult.logged||0}`,"#2e7d32");
 
     await loadQueue();
 
@@ -4776,31 +4874,27 @@ async function saveTaskFromModal(){
       `Note: ${oldTask.note||""} → ${p.note||""}`
     ].join("\n");
 
-    await sendTaskEventTelegram({
+    const newPersonM=memberByName(p.person);
+    const newAmM=memberByName(p.am);
+
+    await sendTelegram({
       event:"update",
-      context:"task_update",
-      source_id:oldTask.source_id||"",
-      project:p.text||oldTask.text||"",
-      task_id:editingTask.id,
-      task_date:oldTask.task_date||task_date,
       person:p.person,
+      person_chat_id:newPersonM?.telegram_chat_id||"",
       am:p.am,
+      am_chat_id:newAmM?.telegram_chat_id||"",
       type:p.type,
-      message:changeLines,
-      sendWeb:true,
-      sendAm:true
+      message:changeLines
     });
 
     if(oldTask.person && oldTask.person!==p.person){
-      await sendTaskEventTelegram({
+      const oldPersonM=memberByName(oldTask.person);
+      await sendTelegram({
         event:"update",
-        context:"task_reassigned_old_web",
-        source_id:oldTask.source_id||"",
-        project:oldTask.text||"",
-        task_id:editingTask.id,
-        task_date:oldTask.task_date||task_date,
         person:oldTask.person,
+        person_chat_id:oldPersonM?.telegram_chat_id||"",
         am:"",
+        am_chat_id:"",
         type:p.type,
         message:
           `Project: ${oldTask.text||""}
@@ -4812,22 +4906,18 @@ async function saveTaskFromModal(){
 `+
           `New Member: ${p.person}
 `+
-          `Date: ${oldTask.task_date||task_date}`,
-        sendWeb:true,
-        sendAm:false
+          `Date: ${oldTask.task_date||task_date}`
       });
     }
 
     if(oldTask.am && oldTask.am!==p.am){
-      await sendTaskEventTelegram({
+      const oldAmM=memberByName(oldTask.am);
+      await sendTelegram({
         event:"update",
-        context:"task_am_changed_old_am",
-        source_id:oldTask.source_id||"",
-        project:oldTask.text||"",
-        task_id:editingTask.id,
-        task_date:oldTask.task_date||task_date,
         person:p.person,
+        person_chat_id:"",
         am:oldTask.am,
+        am_chat_id:oldAmM?.telegram_chat_id||"",
         type:p.type,
         message:
           `Project: ${oldTask.text||""}
@@ -4841,9 +4931,7 @@ async function saveTaskFromModal(){
 `+
           `Member: ${p.person}
 `+
-          `Date: ${oldTask.task_date||task_date}`,
-        sendWeb:false,
-        sendAm:true
+          `Date: ${oldTask.task_date||task_date}`
       });
     }
 
@@ -4974,19 +5062,16 @@ async function removeTask(id){
     task?.am||""
   );
 
-  await sendTaskEventTelegram({
+  const personM=memberByName(task?.person);
+  const amM=memberByName(task?.am);
+
+  await sendTelegram({
     event:"delete",
-    context:"task_delete",
-    source_id:task?.source_id||"",
-    project:task?.text||"",
-    task_id:id,
-    task_date:task?.task_date||"",
     person:task?.person||"",
+    person_chat_id:personM?.telegram_chat_id||"",
     am:task?.am||"",
-    type:task?.type||"",
-    message:detailMessage,
-    sendWeb:true,
-    sendAm:true
+    am_chat_id:amM?.telegram_chat_id||"",
+    message:detailMessage
   });
 
   toast("Đã xóa task, gửi Telegram và trả về queue","#2e7d32");
@@ -5041,19 +5126,16 @@ async function dropToOtherDay(day){
     dragTask.am
   );
 
-  await sendTaskEventTelegram({
+  const personM=memberByName(dragTask.person);
+  const amM=memberByName(dragTask.am);
+
+  await sendTelegram({
     event:"move",
-    context:"task_move",
-    source_id:dragTask.source_id||"",
-    project:dragTask.text||"",
-    task_id:dragTask.id,
-    task_date:newDate,
-    person:dragTask.person||"",
-    am:dragTask.am||"",
-    type:dragTask.type||"",
-    message:detailMessage,
-    sendWeb:true,
-    sendAm:true
+    person:dragTask.person,
+    person_chat_id:personM?.telegram_chat_id||"",
+    am:dragTask.am,
+    am_chat_id:amM?.telegram_chat_id||"",
+    message:detailMessage
   });
 
   dragTask=null;
@@ -5300,7 +5382,7 @@ function showPage(page){
     }
   });
   if(page!=="queue")document.querySelectorAll(".nav [data-queue-filter]").forEach(btn=>btn.classList.remove("active"));
-  ["queue","domain_report","calendar","workload","report","members","logs","telegram_notify","setup"].forEach(p=>{
+  ["queue","domain_report","calendar","workload","report","members","logs","sheet_changes","telegram_notify","setup"].forEach(p=>{
     const el=document.getElementById(`page-${p}`);
     if(el)el.classList.toggle("hidden",p!==page);
   });
@@ -5311,6 +5393,7 @@ function showPage(page){
   if(page==="report")renderReport();
   if(page==="members")loadMembers();
   if(page==="logs")loadAuditLogs();
+  if(page==="sheet_changes")loadSheetChangeLogs();
   if(page==="telegram_notify"){
     if(document.getElementById("resendNotifyDate")&&!resendNotifyDate.value)resendNotifyDate.value=todayStr();
     loadResendNotifyTasks();
