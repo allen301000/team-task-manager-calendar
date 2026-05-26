@@ -786,12 +786,13 @@ td .badge.urgent{margin-top:4px}
             <span class="queue-filter-chip" id="queueCurrentFilterChip">📥 Tiệm mới đủ info</span>
             <select id="queuePackageFilter" onchange="renderQueue()"><option value="">Tất cả gói</option></select>
             <input id="queueAssignMonthFilter" class="queue-month-input" type="month" onchange="renderQueue()" title="Lọc theo tháng assign">
+            <input id="queueAssignedTaskNameFilter" class="queue-search-input hidden" placeholder="Lọc Task name trong Đã assign..." oninput="renderQueue()">
             <input id="queueSearch" class="queue-search-input" placeholder="Tìm project / AM / source id..." oninput="renderQueue()">
           </div>
           <div class="queue-toolbar-right">
             <button class="green" onclick="bulkMarkSelectedDomainNotified()">✅ Đánh dấu đã báo</button>
             <button class="warn" onclick="bulkMarkSelectedDomainUnnotified()">↩️ Đánh dấu chưa báo</button>
-            <button class="ghost" onclick="queueSearch.value='';queuePackageFilter.value='';queueAssignMonthFilter.value='';renderQueue()">Clear filter</button>
+            <button class="ghost" onclick="queueSearch.value='';queuePackageFilter.value='';queueAssignMonthFilter.value='';if(document.getElementById('queueAssignedTaskNameFilter'))queueAssignedTaskNameFilter.value='';renderQueue()">Clear filter</button>
           </div>
         </div>
 
@@ -1258,8 +1259,8 @@ const DEFAULTS={editCode:"TEAM2026",supabaseUrl:"",supabaseKey:"",sheetApi:"",te
 // Sau đó mở ở máy/browser khác, app sẽ tự load Sheet API / Telegram / Tracking / Domain group từ Supabase app_settings.
 // Lưu ý: chỉ dùng Supabase anon/publishable key, tuyệt đối không dùng service_role key.
 const BOOTSTRAP_CONFIG={
-  supabaseUrl:"https://letbykkygmmdxbmnemam.supabase.co", // ví dụ: "https://xxxx.supabase.co"
-  supabaseKey:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxldGJ5a2t5Z21tZHhibW5lbWFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzODAyNTMsImV4cCI6MjA4Mzk1NjI1M30.K8n2WgP7UDu6h5bMlMXwc2HfotUNaoZYRcfE5ninOrc", // anon / publishable key
+  supabaseUrl:"", // ví dụ: "https://xxxx.supabase.co"
+  supabaseKey:"", // anon / publishable key
   settingsProfile:"default"
 };
 const TYPES=["Design + QR","Design","Menu + QR","Custom + QR","Menu","QR"];
@@ -2306,7 +2307,15 @@ function renderQueue(){
   if(document.getElementById("queueCurrentFilterChip"))queueCurrentFilterChip.textContent=queueFilterLabel(st);
   const pkg=queuePackageFilter.value;
   const q=queueSearch.value.trim().toLowerCase();
+  const assignedTaskNameQ=(document.getElementById("queueAssignedTaskNameFilter")?.value||"").trim().toLowerCase();
   const assignMonth=document.getElementById("queueAssignMonthFilter")?.value||"";
+
+  if(document.getElementById("queueAssignedTaskNameFilter")){
+    queueAssignedTaskNameFilter.classList.toggle("hidden", st!=="ASSIGNED");
+    if(st!=="ASSIGNED" && queueAssignedTaskNameFilter.value){
+      queueAssignedTaskNameFilter.value="";
+    }
+  }
 
   let rows=[...queueRows];
   let calendarMonthMode=false;
@@ -2359,6 +2368,10 @@ function renderQueue(){
       r.assigned_person,
       r.assigned_month
     ].join(" ").toLowerCase().includes(q));
+  }
+
+  if(st==="ASSIGNED" && assignedTaskNameQ){
+    rows=rows.filter(r=>String(r.project||r.text||r.source_id||"").toLowerCase().includes(assignedTaskNameQ));
   }
 
   rows=sortQueuePriorityThenSheet(rows);
@@ -5633,10 +5646,17 @@ function showPage(page){
     }
   });
   if(page!=="queue")document.querySelectorAll(".nav [data-queue-filter]").forEach(btn=>btn.classList.remove("active"));
-  ["queue","domain_report","calendar","workload","report","members","logs","sheet_changes","telegram_notify","setup"].forEach(p=>{
-    const el=document.getElementById(`page-${p}`);
-    if(el)el.classList.toggle("hidden",p!==page);
-  });
+
+  // Ẩn toàn bộ page section trước, rồi chỉ mở đúng page được chọn.
+  // Cách này đảm bảo block "Gửi lại thông báo Telegram" chỉ xuất hiện khi bấm menu "Gửi lại Tele".
+  document.querySelectorAll('main > section[id^="page-"]').forEach(section=>section.classList.add("hidden"));
+  const activeSection=document.getElementById(`page-${page}`);
+  if(activeSection)activeSection.classList.remove("hidden");
+
+  // Chặn cứng: nếu không ở tab Gửi lại Tele thì không load/hiển thị UI resend Telegram.
+  const telePage=document.getElementById("page-telegram_notify");
+  if(telePage && page!=="telegram_notify")telePage.classList.add("hidden");
+
   if(page==="queue")loadQueue();
   if(page==="domain_report")loadDomainReport();
   if(page==="calendar")render();
@@ -5650,6 +5670,11 @@ function showPage(page){
     loadResendNotifyTasks();
     loadTelegramNotifyLogs();
   }
+}
+
+function isTelegramNotifyPageActive(){
+  const page=document.getElementById("page-telegram_notify");
+  return !!page && !page.classList.contains("hidden");
 }
 
 async function saveSettingsToCloud(showToast=true){
@@ -5813,6 +5838,7 @@ async function loadTelegramNotifyLogs(){
 }
 
 function renderTelegramNotifyLogs(){
+  if(!isTelegramNotifyPageActive())return;
   const body=document.getElementById("telegramNotifyLogBody");
   if(!body)return;
   const rows=(telegramNotifyLogs||[]).slice(0,200);
@@ -5926,6 +5952,7 @@ async function loadResendNotifyTasks(){
 }
 
 function renderResendNotifyTasks(){
+  if(!isTelegramNotifyPageActive())return;
   const body=document.getElementById("resendNotifyBody");
   if(!body)return;
   const q=(document.getElementById("resendNotifySearch")?.value||"").trim().toLowerCase();
@@ -6031,7 +6058,7 @@ setupUi();
     await loadMembers();
     await render();
     await loadQueue();
-    await loadTelegramNotifyLogs();
+    // Telegram resend/log chỉ load khi mở tab Gửi lại Tele.
 
     supabaseClient
       .channel("tasks-rt")
