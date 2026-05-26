@@ -1105,7 +1105,7 @@ td .badge.urgent{margin-top:4px}
 
     <section id="page-logs" class="hidden">
       <div class="top"><div><h2>🧾 Audit Logs</h2><div class="sub">Theo dõi assign, unassign, delete, move, done.</div></div><button onclick="loadAuditLogs()">Reload</button></div>
-      <div class="card"><div class="wrap"><table><thead><tr><th>Time</th><th>Action</th><th>Project</th><th>Person</th><th>AM</th><th>Detail</th></tr></thead><tbody id="logsBody"></tbody></table></div></div>
+      <div class="card"><div class="wrap"><table><thead><tr><th>Time</th><th>Action</th><th>Project</th><th>Person</th><th>AM</th><th>Nội dung báo AM khi done</th><th>Detail</th></tr></thead><tbody id="logsBody"></tbody></table></div></div>
     </section>
 
     <section id="page-setup" class="hidden">
@@ -1842,7 +1842,26 @@ async function logAction(action,taskId,sourceId,project,person,detail="",am=""){
   }
   await sendTrackingLog(action,trackPayload);
 }
-async function loadAuditLogs(){if(!requireDb())return;const {data,error}=await supabaseClient.from("task_audit_logs").select("*").order("created_at",{ascending:false}).limit(300);if(error){toast("Lỗi load logs: "+error.message,"#b71c1c");return}auditLogs=data||[];logsBody.innerHTML=auditLogs.map(l=>`<tr><td>${esc(new Date(l.created_at).toLocaleString())}</td><td>${esc(l.action)}</td><td>${esc(l.project||"")}</td><td>${esc(l.person||"")}</td><td>${esc(l.am||"")}</td><td>${esc(l.detail||"")}</td></tr>`).join("")}
+function formatAuditDetailText(text){
+  return esc(text||"").replace(/\n/g,"<br>");
+}
+
+async function loadAuditLogs(){
+  if(!requireDb())return;
+  const {data,error}=await supabaseClient
+    .from("task_audit_logs")
+    .select("*")
+    .order("created_at",{ascending:false})
+    .limit(300);
+  if(error){toast("Lỗi load logs: "+error.message,"#b71c1c");return}
+  auditLogs=data||[];
+  logsBody.innerHTML=auditLogs.map(l=>{
+    const isDone=String(l.action||"").toLowerCase()==="done";
+    const amNotice=isDone?formatAuditDetailText(l.detail||""):"";
+    const detail=isDone?"Đã gửi thông báo hoàn thành cho AM":formatAuditDetailText(l.detail||"");
+    return `<tr><td>${esc(new Date(l.created_at).toLocaleString())}</td><td>${esc(l.action)}</td><td>${esc(l.project||"")}</td><td>${esc(l.person||"")}</td><td>${esc(l.am||"")}</td><td>${amNotice}</td><td>${detail}</td></tr>`;
+  }).join("")||'<tr><td colspan="7" class="muted">Chưa có log</td></tr>';
+}
 
 
 async function selectAllTaskQueueRows(){
