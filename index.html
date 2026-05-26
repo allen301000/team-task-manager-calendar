@@ -993,19 +993,12 @@ td .badge.urgent{margin-top:4px}
           <div class="sub">Chỉ theo dõi các tiệm đã từng có trong Calendar/tasks bị sửa nội dung cột Project trên Sheet.</div>
         </div>
         <div class="tools">
-          <select id="sheetChangeStatusFilter" onchange="renderSheetChangeLogs(sheetChangeRowsCache,'all',{fromCache:true})" style="width:auto">
-            <option value="unchecked">Chưa check</option>
-            <option value="all">Tất cả</option>
-            <option value="checked">Đã check</option>
-          </select>
           <button onclick="loadSheetChangeLogs()">Load changes</button>
-          <button class="green" onclick="markSelectedSheetChangesChecked()">✅ Đánh dấu đã check</button>
-          <button class="ghost" onclick="markAllVisibleSheetChangesChecked()">Check tất cả đang hiển thị</button>
         </div>
       </div>
       <div class="kpi-compact-row">
         <div class="kpi-compact"><div class="label">Tiệm đổi Project</div><div class="value" id="sheetChangeTotal">0</div><div class="hint">Có trong Calendar bất kỳ tháng nào</div></div>
-        <div class="kpi-compact"><div class="label">Cần kiểm tra</div><div class="value" id="sheetChangeProjectCode">0</div><div class="hint">Old Project &gt; New Project</div></div>
+        <div class="kpi-compact"><div class="label">Chưa check</div><div class="value" id="sheetChangeProjectCode">0</div><div class="hint">Cần kiểm tra và đánh dấu</div></div>
       </div>
       <div class="card queue-table-card">
         <div class="queue-section-title">
@@ -1015,9 +1008,23 @@ td .badge.urgent{margin-top:4px}
           </div>
           <div class="muted">Chỉ hiển thị log đổi Project nếu tiệm đó đã từng có task thật trong Calendar.</div>
         </div>
+        <div class="queue-toolbar">
+          <div class="queue-toolbar-left">
+            <select id="sheetChangeCheckedFilter" onchange="renderSheetChangeLogs(window._sheetChangeRows||[], 'all', window._sheetChangeMeta||{})">
+              <option value="unchecked">Chưa check</option>
+              <option value="all">Tất cả</option>
+              <option value="checked">Đã check</option>
+            </select>
+          </div>
+          <div class="queue-toolbar-right">
+            <button class="green" onclick="markSelectedSheetChangesChecked()">✅ Đánh dấu đã check</button>
+            <button class="ghost" onclick="toggleSheetChangeCheckAll(true)">Chọn tất cả</button>
+            <button class="ghost" onclick="toggleSheetChangeCheckAll(false)">Bỏ chọn</button>
+          </div>
+        </div>
         <div class="wrap">
           <table>
-            <thead><tr><th><input type="checkbox" id="sheetChangeCheckAll" onchange="toggleSheetChangeCheckAll(this.checked)"></th><th>Time</th><th>Source row</th><th>Project cũ</th><th></th><th>Project mới</th><th>Status</th><th>Action</th></tr></thead>
+            <thead><tr><th><input type="checkbox" id="sheetChangeCheckAll" onchange="toggleSheetChangeCheckAll(this.checked)"></th><th>Status</th><th>Time</th><th>Source row</th><th>Project cũ</th><th></th><th>Project mới</th><th>Action</th></tr></thead>
             <tbody id="sheetChangeBody"></tbody>
           </table>
         </div>
@@ -1151,6 +1158,15 @@ td .badge.urgent{margin-top:4px}
           <label>Mention trong group domain</label>
           <input id="setDomainMention" class="setup-secret" type="password" autocomplete="new-password" spellcheck="false" placeholder="@lee_web"><br><br>
 
+          <h3>Auto Assign</h3>
+          <label style="display:flex;align-items:center;gap:8px;font-weight:700">
+            <input id="setAutoAssignEnabled" type="checkbox" style="width:auto"> Bật tự động assign sau khi Sync Sheet
+          </label><br>
+          <label>Telegram Chat ID nhận báo cáo Auto Assign</label>
+          <input id="setAssignNotifyChatId" class="setup-secret" type="password" autocomplete="new-password" spellcheck="false" placeholder="Chat ID của bạn để nhận summary assign"><br><br>
+
+          <div class="note">Khi bật Auto Assign, sau Sync Sheet app sẽ validate danh sách tiệm mới đã báo domain rồi tự assign theo rule Assign batch. Báo cáo trước/sau assign sẽ gửi về Chat ID này nếu có.</div>
+          <br>
           <div class="note">Dữ liệu vẫn được lưu/load bình thường, chỉ ẩn trên giao diện để tránh lộ key khi chia sẻ màn hình.</div>
         </div>
       </div>
@@ -1235,7 +1251,7 @@ td .badge.urgent{margin-top:4px}
 <div id="toast" class="toast"></div>
 
 <script>
-const DEFAULTS={editCode:"TEAM2026",supabaseUrl:"",supabaseKey:"",sheetApi:"",telegramWebhook:"",trackingWebhook:"",domainGroupChatId:"",domainMention:"@lee_web",settingsProfile:"default"};
+const DEFAULTS={editCode:"TEAM2026",supabaseUrl:"",supabaseKey:"",sheetApi:"",telegramWebhook:"",trackingWebhook:"",domainGroupChatId:"",domainMention:"@lee_web",autoAssignEnabled:false,assignNotifyChatId:"",settingsProfile:"default"};
 
 // ===== Auto boot cloud settings =====
 // Điền sẵn 2 key public này một lần trong file HTML.
@@ -1276,7 +1292,6 @@ if(!String(settings.settingsProfile||"").trim()&&String(BOOTSTRAP_CONFIG.setting
 }
 let supabaseClient=null,current=new Date(),cache={},queueRows=[],members=[],auditLogs=[];
 let reportDataCache={month:"",loading:false,currentTasks:[],prevTasks:[]};
-let sheetChangeRowsCache=[];
 let selectedQueue=null,selectedDay=null,editingTask=null,editingMember=null,dragTask=null,dragFromDay=null,dragFromIndex=null,contextQueueSourceId=null;
 let queueRenderToken=0;
 let canEdit=localStorage.getItem("tm_canEdit")==="1";
@@ -1578,10 +1593,6 @@ function updateQueueMenuCounts(){
   if(document.getElementById("navCountSkipped"))navCountSkipped.textContent=counts.skipped;
   if(document.getElementById("navCountAll"))navCountAll.textContent=counts.all;
   if(document.getElementById("navCountDomainReported"))navCountDomainReported.textContent=counts.domainReported;
-  if(document.getElementById("navCountSheetChanges")){
-    const unchecked=(sheetChangeRowsCache||[]).filter(r=>!r.checked).length;
-    navCountSheetChanges.textContent=unchecked;
-  }
 }
 function setQueueMenuFilter(value){
   const finalValue=value||"CURRENT";
@@ -1657,6 +1668,8 @@ function setupUi(){
   if(document.getElementById("setTrackingWebhook"))setTrackingWebhook.value=settings.trackingWebhook||"";
   setDomainGroupChat.value=settings.domainGroupChatId||"";
   setDomainMention.value=settings.domainMention||"@lee_web";
+  if(document.getElementById("setAutoAssignEnabled"))setAutoAssignEnabled.checked=!!settings.autoAssignEnabled;
+  if(document.getElementById("setAssignNotifyChatId"))setAssignNotifyChatId.value=settings.assignNotifyChatId||"";
   if(document.getElementById("queueCurrentFilterChip"))queueCurrentFilterChip.textContent=queueFilterLabel(queueStatusFilter?.value||"CURRENT");
   updateEditState();
 }
@@ -1669,6 +1682,8 @@ function saveSettings(){
   settings.trackingWebhook=document.getElementById("setTrackingWebhook")?setTrackingWebhook.value.trim():"";
   settings.domainGroupChatId=setDomainGroupChat.value.trim();
   settings.domainMention=setDomainMention.value.trim()||"@lee_web";
+  settings.autoAssignEnabled=!!document.getElementById("setAutoAssignEnabled")?.checked;
+  settings.assignNotifyChatId=document.getElementById("setAssignNotifyChatId")?setAssignNotifyChatId.value.trim():"";
   localStorage.setItem("tm_settings",JSON.stringify(settings));
   initClient();
   toast("Đã lưu setup","#2e7d32");
@@ -1699,18 +1714,6 @@ function showPage(page){
   if(page==="report")renderReport();
   if(page==="members")loadMembers();
   if(page==="logs")loadAuditLogs();
-  if(page==="sheet_changes")loadSheetChangeLogs();
-}
-
-
-function normalizeWebhookUrlForCompare(url){
-  return String(url||"").trim().replace(/\/+$/g,"");
-}
-
-function isTrackingWebhookSameAsTelegram(){
-  const tracking=normalizeWebhookUrlForCompare(settings.trackingWebhook);
-  const telegram=normalizeWebhookUrlForCompare(settings.telegramWebhook);
-  return !!tracking && !!telegram && tracking===telegram;
 }
 
 function buildTrackingPayload(action, payload={}){
@@ -1721,11 +1724,11 @@ function buildTrackingPayload(action, payload={}){
     timestamp:now.toISOString(),
     date:now.toISOString().slice(0,10),
     month:now.toISOString().slice(0,7),
-    tracking_only:true,
-    mode:"tracking",
     action:action||payload.action||"info",
     event:"tracking",
     original_event:payload.event||"",
+    tracking_only:true,
+    mode:"tracking",
     result:payload.result||"info",
     source_id:payload.source_id||payload.sourceId||"",
     project:payload.project||payload.text||payload.message_project||"",
@@ -1743,22 +1746,19 @@ function buildTrackingPayload(action, payload={}){
     detail:payload.detail||payload.message||"",
     error:payload.error||"",
     payload_json:JSON.stringify(payload||{}).slice(0,45000),
-    app_version:"tracking-v2-no-telegram-route",
+    app_version:"tracking-v1",
     user_agent:navigator.userAgent
   };
 }
 
 async function sendTrackingLog(action,payload={}){
   if(!settings.trackingWebhook)return {skipped:true};
-
-  // Chặn lỗi Telegram bị gửi dư 1 tin chỉ có tiêu đề [TASK NEW]/[AM]...
-  // Nếu Tracking webhook đang dùng chung URL với Telegram webhook, tuyệt đối không POST tracking qua endpoint đó.
-  // Các log quan trọng vẫn đã có trong Supabase: task_audit_logs / telegram_notification_logs.
-  if(isTrackingWebhookSameAsTelegram()){
-    console.warn("Tracking skipped because trackingWebhook equals telegramWebhook", action);
+  const trackingUrl=String(settings.trackingWebhook||"").trim();
+  const telegramUrl=String(settings.telegramWebhook||"").trim();
+  if(trackingUrl && telegramUrl && trackingUrl===telegramUrl){
+    console.warn("Tracking webhook trùng Telegram webhook, bỏ qua tracking để tránh gửi Telegram 2 lần", {action});
     return {skipped:true,reason:"tracking_webhook_same_as_telegram"};
   }
-
   const body=buildTrackingPayload(action,payload);
   try{
     const res=await fetch(settings.trackingWebhook,{
@@ -2706,6 +2706,11 @@ async function syncAssignedFromCalendarByMonth(){
 
     await loadQueue();
 
+    if(settings.autoAssignEnabled){
+      logDebug("Auto Assign enabled: chạy sau Sync Sheet");
+      await runAutoAssignAfterSync();
+    }
+
   }catch(e){
     console.error(e);
     toast("Lỗi sync assigned theo tháng: "+(e.message||e), "#b71c1c");
@@ -3014,92 +3019,78 @@ async function loadSheetChangeLogs(){
     const calendarSet=buildCalendarProjectMatchSet(calendarTasks||[]);
     const allLogs=logRes.data||[];
     const matchedLogs=allLogs.filter(r=>sheetProjectChangeMatchesCalendar(r,calendarSet));
-    sheetChangeRowsCache=matchedLogs;
     renderSheetChangeLogs(matchedLogs,"all",{totalLogs:allLogs.length,calendarTasks:(calendarTasks||[]).length});
   }catch(e){
     if(document.getElementById("sheetChangeSummary"))sheetChangeSummary.textContent="Lỗi load sheet_change_logs: "+(e.message||e);
-    if(document.getElementById("sheetChangeBody"))sheetChangeBody.innerHTML='<tr><td colspan="8" class="muted">Chưa có bảng sheet_change_logs hoặc lỗi load. Hãy chạy SQL patch.</td></tr>';
+    if(document.getElementById("sheetChangeBody"))sheetChangeBody.innerHTML='<tr><td colspan="5" class="muted">Chưa có bảng sheet_change_logs hoặc lỗi load. Hãy chạy SQL patch.</td></tr>';
   }
 }
 
-function getSheetChangeStatusFilter(){
-  return document.getElementById("sheetChangeStatusFilter")?.value||"unchecked";
+function getFilteredSheetChangeRows(rows){
+  const filter=document.getElementById("sheetChangeCheckedFilter")?.value||"unchecked";
+  const projectRows=(rows||[]).filter(r=>r.change_type==="project_changed"||r.change_type==="project_code_changed");
+  if(filter==="checked")return projectRows.filter(r=>!!r.checked);
+  if(filter==="all")return projectRows;
+  return projectRows.filter(r=>!r.checked);
 }
 
-function getVisibleSheetChangeRows(rows){
+function updateSheetChangeSidebarCount(rows){
   const projectRows=(rows||[]).filter(r=>r.change_type==="project_changed"||r.change_type==="project_code_changed");
-  const filter=getSheetChangeStatusFilter();
-  if(filter==="checked")return projectRows.filter(r=>!!r.checked);
-  if(filter==="unchecked")return projectRows.filter(r=>!r.checked);
-  return projectRows;
+  const unchecked=projectRows.filter(r=>!r.checked).length;
+  if(document.getElementById("navCountSheetChanges"))navCountSheetChanges.textContent=unchecked;
+  return unchecked;
 }
 
 function renderSheetChangeLogs(rows,month,meta={}){
+  window._sheetChangeRows=rows||[];
+  window._sheetChangeMeta=meta||{};
   const projectRows=(rows||[]).filter(r=>r.change_type==="project_changed"||r.change_type==="project_code_changed");
-  const visibleRows=getVisibleSheetChangeRows(projectRows);
-  const uncheckedCount=projectRows.filter(r=>!r.checked).length;
-  const checkedCount=projectRows.filter(r=>!!r.checked).length;
-
+  const unchecked=updateSheetChangeSidebarCount(projectRows);
+  const visibleRows=getFilteredSheetChangeRows(projectRows);
   if(document.getElementById("sheetChangeTotal"))sheetChangeTotal.textContent=projectRows.length;
-  if(document.getElementById("sheetChangeProjectCode"))sheetChangeProjectCode.textContent=uncheckedCount;
-  if(document.getElementById("navCountSheetChanges"))navCountSheetChanges.textContent=uncheckedCount;
+  if(document.getElementById("sheetChangeProjectCode"))sheetChangeProjectCode.textContent=unchecked;
   if(document.getElementById("sheetChangeSummary")){
-    sheetChangeSummary.textContent=`${projectRows.length} tiệm đổi Project có trong Calendar • Chưa check ${uncheckedCount} • Đã check ${checkedCount} • Calendar ${meta.calendarTasks||0} task • Tổng log đổi Project ${meta.totalLogs||projectRows.length}`;
+    sheetChangeSummary.textContent=`${projectRows.length} tiệm đổi Project có trong Calendar • Chưa check ${unchecked} • Đang hiển thị ${visibleRows.length} • Calendar ${meta.calendarTasks||0} task`;
   }
   if(!document.getElementById("sheetChangeBody"))return;
-
   sheetChangeBody.innerHTML=visibleRows.map(r=>`<tr class="${r.checked?'queue-row-assigned':''}">
-    <td><input type="checkbox" class="sheet-change-check" value="${esc(r.id||'')}" ${r.checked?'disabled':''}></td>
+    <td><input type="checkbox" class="sheet-change-check" value="${esc(r.id||"")}" ${r.checked?'disabled':''}></td>
+    <td>${r.checked?'<span class="badge assigned">Đã check</span>':'<span class="badge pending">Chưa check</span>'}</td>
     <td>${esc(new Date(r.change_time||Date.now()).toLocaleString())}</td>
     <td>${esc(r.source_row||"")}</td>
     <td>${esc(r.old_project||r.old_value||"")}</td>
     <td style="text-align:center;font-weight:900;color:#f05a28">&gt;</td>
     <td><b>${esc(r.new_project||r.new_value||"")}</b></td>
-    <td>${r.checked?`<span class="badge assigned">Đã check</span><div class="muted">${esc(r.checked_at?new Date(r.checked_at).toLocaleString():"")}</div>`:`<span class="badge pending">Chưa check</span>`}</td>
-    <td>${r.checked?"-":`<button class="green" onclick='markSheetChangesChecked([${JSON.stringify(r.id)}])'>Đã check</button>`}</td>
-  </tr>`).join("")||'<tr><td colspan="8" class="muted">Không có tiệm đổi Project theo bộ lọc hiện tại</td></tr>';
+    <td>${r.checked?'-':`<button class="green" onclick="markSheetChangesChecked(['${esc(r.id||"")}'])">Đã check</button>`}</td>
+  </tr>`).join("")||'<tr><td colspan="8" class="muted">Không có tiệm đổi Project phù hợp filter</td></tr>';
 }
 
 function toggleSheetChangeCheckAll(checked){
   document.querySelectorAll(".sheet-change-check:not(:disabled)").forEach(cb=>cb.checked=checked);
+  if(document.getElementById("sheetChangeCheckAll"))sheetChangeCheckAll.checked=checked;
 }
 
 function getSelectedSheetChangeIds(){
-  return [...document.querySelectorAll(".sheet-change-check:checked")]
-    .map(cb=>cb.value)
-    .filter(Boolean);
+  return [...document.querySelectorAll(".sheet-change-check:checked")].map(cb=>String(cb.value||"").trim()).filter(Boolean);
 }
 
 async function markSelectedSheetChangesChecked(){
   const ids=getSelectedSheetChangeIds();
-  if(!ids.length){toast("Chưa chọn dòng Project Changed nào", "#8a6d00");return;}
-  await markSheetChangesChecked(ids);
-}
-
-async function markAllVisibleSheetChangesChecked(){
-  const ids=getVisibleSheetChangeRows(sheetChangeRowsCache)
-    .filter(r=>!r.checked&&r.id)
-    .map(r=>r.id);
-  if(!ids.length){toast("Không có dòng chưa check trong danh sách hiện tại", "#8a6d00");return;}
-  if(!confirm(`Đánh dấu đã check ${ids.length} tiệm đổi Project đang hiển thị?`))return;
+  if(!ids.length){toast("Chưa chọn dòng thay đổi nào", "#8a6d00");return;}
   await markSheetChangesChecked(ids);
 }
 
 async function markSheetChangesChecked(ids){
   if(!requireDb())return;
-  const clean=[...new Set((ids||[]).filter(Boolean))];
+  const clean=[...new Set((ids||[]).map(x=>String(x||"").trim()).filter(Boolean))];
   if(!clean.length)return;
-  const nowIso=new Date().toISOString();
-  for(const chunk of chunkList(clean,100)){
-    const {error}=await supabaseClient
-      .from("sheet_change_logs")
-      .update({checked:true,checked_at:nowIso,checked_by:"manual"})
-      .in("id",chunk);
-    if(error){toast("Lỗi đánh dấu đã check: "+error.message,"#b71c1c");return;}
-  }
-  sheetChangeRowsCache=(sheetChangeRowsCache||[]).map(r=>clean.includes(r.id)?{...r,checked:true,checked_at:nowIso,checked_by:"manual"}:r);
-  renderSheetChangeLogs(sheetChangeRowsCache,"all",{fromCache:true});
-  toast(`Đã đánh dấu check ${clean.length} tiệm`, "#2e7d32");
+  const {error}=await supabaseClient
+    .from("sheet_change_logs")
+    .update({checked:true,checked_at:new Date().toISOString(),checked_by:"web"})
+    .in("id",clean);
+  if(error){toast("Lỗi đánh dấu đã check: "+error.message, "#b71c1c");return;}
+  toast(`Đã đánh dấu ${clean.length} dòng là đã check`, "#2e7d32");
+  await loadSheetChangeLogs();
 }
 
 
@@ -4544,11 +4535,97 @@ function nextWorkdayFrom(dateStr){
   return d.toISOString().slice(0,10);
 }
 
+
+function addWorkdaysFrom(startDateStr, workdayOffset){
+  const d=new Date((startDateStr||todayStr())+"T00:00:00");
+  let left=Number(workdayOffset||0);
+  while(d.getDay()===0||d.getDay()===6){d.setDate(d.getDate()+1);}
+  while(left>0){
+    d.setDate(d.getDate()+1);
+    if(d.getDay()!==0&&d.getDay()!==6)left--;
+  }
+  return d.toISOString().slice(0,10);
+}
+
+function estimateAssignSchedule(rows){
+  const people=webMembers();
+  const start=nextWorkdayFrom(todayStr());
+  return (rows||[]).map((r,idx)=>{
+    const person=people.length?people[idx%people.length]:null;
+    const dayOffset=people.length?Math.floor(idx/people.length):0;
+    return {source_id:r.source_id,planned_web:person?.name||"-",planned_date:addWorkdaysFrom(start,dayOffset),member:person};
+  });
+}
+
+async function sendAssignAdminNotice(title, planOrResult={}){
+  const chatId=String(settings.assignNotifyChatId||"").trim();
+  if(!chatId||!settings.telegramWebhook)return {skipped:true};
+  const lines=[];
+  lines.push(title);
+  if(planOrResult.started_from)lines.push(`Bắt đầu từ: ${planOrResult.started_from}`);
+  if(planOrResult.assign_count!=null)lines.push(`Dự kiến assign: ${planOrResult.assign_count}`);
+  if(planOrResult.warning_count!=null)lines.push(`Cảnh báo: ${planOrResult.warning_count}`);
+  if(planOrResult.assigned_count!=null)lines.push(`Đã assign: ${planOrResult.assigned_count}`);
+  if(planOrResult.skipped_count!=null)lines.push(`Bỏ qua: ${planOrResult.skipped_count}`);
+  if(planOrResult.telegram_sent!=null)lines.push(`Telegram gửi: ${planOrResult.telegram_sent}`);
+  const preview=(planOrResult.rows||[]).slice(0,20).map(r=>`• ${r.planned_date||r.task_date||""} ${r.planned_web||r.person||""}: ${r.project||r.source_id||""}`).join("\n");
+  if(preview)lines.push("\nDanh sách dự kiến:",preview);
+  if((planOrResult.rows||[]).length>20)lines.push(`... và ${(planOrResult.rows||[]).length-20} dòng khác`);
+  try{
+    await sendTelegram({event:"new",recipient:"web",person:"Admin",person_chat_id:chatId,am:"",am_chat_id:"",message:lines.join("\n")});
+    return {ok:true};
+  }catch(e){
+    logDebug("⚠️ Không gửi được admin auto assign notice", e?.message||String(e));
+    return {ok:false,error:e?.message||String(e)};
+  }
+}
+
+async function runAutoAssignAfterSync(){
+  if(!settings.autoAssignEnabled)return;
+  if(!requireDb())return;
+  await ensureMembersReadyForNotify();
+  const candidates=sortQueuePriorityThenSheet((queueRows||[]).filter(r=>{
+    const status=String(r.queue_status||"NEW").trim();
+    return status==="NEW" && !isQueueAssigned(r) && shouldShowInCurrentQueue(r) && !!r.domain_notified;
+  }));
+  if(!candidates.length){
+    logDebug("Auto Assign: không có project NEW đã báo domain để assign");
+    await sendAssignAdminNotice("[AUTO ASSIGN] Không có task cần assign", {assign_count:0,warning_count:0,rows:[]});
+    return;
+  }
+  const plan=await buildAssignValidationPlan(candidates,[]);
+  await sendAssignAdminNotice("[AUTO ASSIGN] Validate trước khi assign", plan);
+  const sourceIds=candidates.map(r=>r.source_id).filter(Boolean);
+  try{
+    toast(`Auto assign đang chạy ${sourceIds.length} project...`, "#f05a28");
+    const {data,error}=await supabaseClient.rpc("assign_batch_queue_v3",{p_source_ids:sourceIds});
+    if(error)throw error;
+    const rows=data||[];
+    const assignedRows=rows.filter(r=>!r.skipped_reason);
+    const skippedRows=rows.filter(r=>r.skipped_reason);
+    let notifyResult={sent:0,missing:0,failed:0};
+    if(assignedRows.length){
+      notifyResult=await sendBulkAssignNotifications(assignedRows,candidates);
+    }
+    await sendAssignAdminNotice("[AUTO ASSIGN] Đã chạy xong", {assigned_count:assignedRows.length,skipped_count:skippedRows.length,telegram_sent:notifyResult.sent||0,rows:assignedRows.map(r=>({project:r.project,person:r.person,task_date:r.task_date}))});
+    await sendTrackingLog("auto_assign_done",{result:"success",assigned_count:assignedRows.length,skipped_count:skippedRows.length,telegram_result:notifyResult});
+    await loadQueue();
+    toast(`Auto assign xong: ${assignedRows.length} task`, "#2e7d32");
+  }catch(e){
+    await sendAssignAdminNotice("[AUTO ASSIGN] Lỗi", {assigned_count:0,skipped_count:0,rows:[{project:e?.message||String(e)}]});
+    await sendTrackingLog("auto_assign_error",{result:"failed",error:e?.message||String(e)});
+    toast("Auto assign lỗi: "+(e.message||e), "#b71c1c");
+    logDebug("AUTO ASSIGN ERROR", e?.message||String(e));
+  }
+}
+
 async function buildAssignValidationPlan(selectedRows, skippedByUi=[]){
   await ensureMembersReadyForNotify();
   const today=nextWorkdayFrom(todayStr());
   const sourceIds=[...new Set((selectedRows||[]).map(r=>String(r.source_id||"").trim()).filter(Boolean))];
   const people=webMembers();
+  const schedule=estimateAssignSchedule(selectedRows||[]);
+  const scheduleById=new Map(schedule.map(x=>[String(x.source_id||""),x]));
   const warnings=[];
   const existingMap=new Map();
 
@@ -4574,7 +4651,8 @@ async function buildAssignValidationPlan(selectedRows, skippedByUi=[]){
   const rows=(selectedRows||[]).map((r,idx)=>{
     const sourceId=String(r.source_id||"").trim();
     const project=String(r.project||sourceId).trim();
-    const plannedWeb=people.length?people[idx%people.length]:null;
+    const sch=scheduleById.get(sourceId)||{};
+    const plannedWeb=sch.member || (people.length?people[idx%people.length]:null);
     const amInfo=resolveAssignAm(r.am||"None",r);
     const amMember=amInfo.member||findMemberLooseByName(amInfo.name,["AM","BOTH"]);
     const existing=existingMap.get(sourceId);
@@ -4592,8 +4670,8 @@ async function buildAssignValidationPlan(selectedRows, skippedByUi=[]){
       project,
       am:amInfo.name||String(r.am||""),
       domain:String(r.domain_url||"").trim()||"sub",
-      planned_web:plannedWeb?.name||"-",
-      planned_date:today,
+      planned_web:plannedWeb?.name||sch.planned_web||"-",
+      planned_date:sch.planned_date||today,
       warnings:rowWarnings
     };
   });
@@ -5488,6 +5566,8 @@ function getSettingsSnapshot(){
     trackingWebhook:settings.trackingWebhook||"",
     domainGroupChatId:settings.domainGroupChatId||"",
     domainMention:settings.domainMention||"@lee_web",
+    autoAssignEnabled:!!settings.autoAssignEnabled,
+    assignNotifyChatId:settings.assignNotifyChatId||"",
     settingsProfile:settings.settingsProfile||"default"
   };
 }
@@ -5504,6 +5584,8 @@ function applySettingsSnapshot(next={},shouldSave=true){
   if(byId("setTrackingWebhook"))setTrackingWebhook.value=settings.trackingWebhook||"";
   if(byId("setDomainGroupChat"))setDomainGroupChat.value=settings.domainGroupChatId||"";
   if(byId("setDomainMention"))setDomainMention.value=settings.domainMention||"@lee_web";
+  if(byId("setAutoAssignEnabled"))setAutoAssignEnabled.checked=!!settings.autoAssignEnabled;
+  if(byId("setAssignNotifyChatId"))setAssignNotifyChatId.value=settings.assignNotifyChatId||"";
   if(byId("setSettingsProfile"))setSettingsProfile.value=settings.settingsProfile||"default";
   setupSecretInputs();
 }
@@ -5529,6 +5611,10 @@ async function saveSettings(){
   settings.trackingWebhook=document.getElementById("setTrackingWebhook")?setTrackingWebhook.value.trim():"";
   settings.domainGroupChatId=setDomainGroupChat.value.trim();
   settings.domainMention=setDomainMention.value.trim()||"@lee_web";
+  settings.autoAssignEnabled=!!document.getElementById("setAutoAssignEnabled")?.checked;
+  settings.assignNotifyChatId=document.getElementById("setAssignNotifyChatId")?setAssignNotifyChatId.value.trim():"";
+  settings.autoAssignEnabled=!!document.getElementById("setAutoAssignEnabled")?.checked;
+  settings.assignNotifyChatId=document.getElementById("setAssignNotifyChatId")?setAssignNotifyChatId.value.trim():"";
   settings.settingsProfile=document.getElementById("setSettingsProfile")?(setSettingsProfile.value.trim()||"default"):"default";
   localStorage.setItem("tm_settings",JSON.stringify(settings));
   initClient();
