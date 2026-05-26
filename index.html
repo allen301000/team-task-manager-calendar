@@ -2942,6 +2942,40 @@ function normalizeCompareValue(v){
   return String(v ?? "").trim().replace(/\s+/g," ");
 }
 
+function sheetChangeDedupKey(row){
+  const sourceRow=String(row?.source_row||"").trim();
+  const oldProject=normalizeProjectFullForCompare(row?.old_project||row?.old_value||"");
+  const newProject=normalizeProjectFullForCompare(row?.new_project||row?.new_value||"");
+  return `${sourceRow}||${oldProject}||${newProject}`;
+}
+
+function dedupeSheetChangeRows(rows){
+  const map=new Map();
+
+  (rows||[]).forEach(row=>{
+    const key=sheetChangeDedupKey(row);
+    if(!key||key==="||||")return;
+
+    const old=map.get(key);
+    if(!old){
+      map.set(key,{...row,_duplicate_ids:[row.id].filter(Boolean),_duplicate_count:1});
+      return;
+    }
+
+    const oldTime=new Date(old.change_time||0).getTime()||0;
+    const newTime=new Date(row.change_time||0).getTime()||0;
+    const keep=newTime>=oldTime?{...row}:{...old};
+
+    keep.checked=!!old.checked||!!row.checked;
+    keep.checked_at=old.checked_at||row.checked_at||null;
+    keep._duplicate_ids=[...(old._duplicate_ids||[]),row.id].filter(Boolean);
+    keep._duplicate_count=(old._duplicate_count||1)+1;
+    map.set(key,keep);
+  });
+
+  return [...map.values()].sort((a,b)=>String(b.change_time||"").localeCompare(String(a.change_time||"")));
+}
+
 function buildSheetProjectChangeLog(oldRow,newRow,nowIso){
   return {
     change_time:nowIso,
@@ -2993,8 +3027,38 @@ async function detectSheetChangesBeforeUpsert(payload, nowIso){
 
     if(!logs.length)return {logged:0,projectChanged:0,projectCodeChanged:0};
 
+    // Chống ghi trùng: cùng source_row + Project cũ + Project mới chỉ log 1 lần.
+    // Nếu sync lại nhiều lần mà Sheet vẫn đổi giống cũ, app sẽ bỏ qua.
+    const {data:existingLogs,error:existingErr}=await supabaseClient
+      .from("sheet_change_logs")
+      .select("source_row,old_project,new_project,old_value,new_value,change_type")
+      .in("change_type",["project_changed","project_code_changed"])
+      .limit(10000);
+
+    if(existingErr){
+      logDebug("⚠️ Không check được log trùng sheet_change_logs, vẫn tiếp tục insert.",existingErr.message);
+    }
+
+    const existingKeys=new Set((existingLogs||[]).map(sheetChangeDedupKey));
+    const seenNewKeys=new Set();
+    const uniqueLogs=[];
+
+    logs.forEach(log=>{
+      const key=sheetChangeDedupKey(log);
+      if(!key||key==="||||")return;
+      if(existingKeys.has(key))return;
+      if(seenNewKeys.has(key))return;
+      seenNewKeys.add(key);
+      uniqueLogs.push(log);
+    });
+
+    if(!uniqueLogs.length){
+      logDebug("Project changes detected but skipped because all were duplicates",{detected:logs.length});
+      return {logged:0,duplicates:logs.length,projectChanged:logs.length,projectCodeChanged:logs.length};
+    }
+
     let inserted=0;
-    for(const chunk of chunkList(logs,200)){
+    for(const chunk of chunkList(uniqueLogs,200)){
       const {error:insErr}=await supabaseClient.from("sheet_change_logs").insert(chunk);
       if(insErr){
         logDebug("⚠️ Không ghi được sheet_change_logs. Hãy chạy SQL tạo bảng.",insErr.message);
@@ -3003,9 +3067,9 @@ async function detectSheetChangesBeforeUpsert(payload, nowIso){
       inserted+=chunk.length;
     }
 
-    logDebug("Project changes detected",{logged:inserted,projectChanged:logs.length});
-    toast(`Phát hiện ${logs.length} tiệm đổi Project trên Sheet`,"#8a6d00");
-    return {logged:inserted,projectChanged:logs.length,projectCodeChanged:logs.length};
+    logDebug("Project changes detected",{detected:logs.length,logged:inserted,duplicates:logs.length-inserted});
+    toast(`Phát hiện ${logs.length} tiệm đổi Project trên Sheet, log mới ${inserted}`,"#8a6d00");
+    return {logged:inserted,duplicates:logs.length-inserted,projectChanged:logs.length,projectCodeChanged:logs.length};
   }catch(e){
     logDebug("Sheet project change detect skipped",e.message||String(e));
     return {logged:0,error:e.message||String(e),projectChanged:0,projectCodeChanged:0};
@@ -3032,7 +3096,8 @@ async function loadSheetChangeLogs(){
     const calendarSet=buildCalendarProjectMatchSet(calendarTasks||[]);
     const allLogs=logRes.data||[];
     const matchedLogs=allLogs.filter(r=>sheetProjectChangeMatchesCalendar(r,calendarSet));
-    renderSheetChangeLogs(matchedLogs,"all",{totalLogs:allLogs.length,calendarTasks:(calendarTasks||[]).length});
+    const dedupedLogs=dedupeSheetChangeRows(matchedLogs);
+    renderSheetChangeLogs(dedupedLogs,"all",{totalLogs:allLogs.length,rawMatched:matchedLogs.length,calendarTasks:(calendarTasks||[]).length});
   }catch(e){
     if(document.getElementById("sheetChangeSummary"))sheetChangeSummary.textContent="Lỗi load sheet_change_logs: "+(e.message||e);
     if(document.getElementById("sheetChangeBody"))sheetChangeBody.innerHTML='<tr><td colspan="5" class="muted">Chưa có bảng sheet_change_logs hoặc lỗi load. Hãy chạy SQL patch.</td></tr>';
@@ -3055,26 +3120,27 @@ function updateSheetChangeSidebarCount(rows){
 }
 
 function renderSheetChangeLogs(rows,month,meta={}){
-  window._sheetChangeRows=rows||[];
+  window._sheetChangeRows=dedupeSheetChangeRows(rows||[]);
   window._sheetChangeMeta=meta||{};
-  const projectRows=(rows||[]).filter(r=>r.change_type==="project_changed"||r.change_type==="project_code_changed");
+  const projectRows=dedupeSheetChangeRows((window._sheetChangeRows||[]).filter(r=>r.change_type==="project_changed"||r.change_type==="project_code_changed"));
   const unchecked=updateSheetChangeSidebarCount(projectRows);
   const visibleRows=getFilteredSheetChangeRows(projectRows);
   if(document.getElementById("sheetChangeTotal"))sheetChangeTotal.textContent=projectRows.length;
   if(document.getElementById("sheetChangeProjectCode"))sheetChangeProjectCode.textContent=unchecked;
   if(document.getElementById("sheetChangeSummary")){
-    sheetChangeSummary.textContent=`${projectRows.length} tiệm đổi Project có trong Calendar • Chưa check ${unchecked} • Đang hiển thị ${visibleRows.length} • Calendar ${meta.calendarTasks||0} task`;
+    const rawText=meta.rawMatched&&meta.rawMatched!==projectRows.length?` • Đã gộp trùng ${meta.rawMatched-projectRows.length}`:"";
+    sheetChangeSummary.textContent=`${projectRows.length} tiệm đổi Project có trong Calendar • Chưa check ${unchecked} • Đang hiển thị ${visibleRows.length} • Calendar ${meta.calendarTasks||0} task${rawText}`;
   }
   if(!document.getElementById("sheetChangeBody"))return;
   sheetChangeBody.innerHTML=visibleRows.map(r=>`<tr class="${r.checked?'queue-row-assigned':''}">
-    <td><input type="checkbox" class="sheet-change-check" value="${esc(r.id||"")}" ${r.checked?'disabled':''}></td>
+    <td><input type="checkbox" class="sheet-change-check" value="${esc(r.id||"")}" data-ids="${esc(JSON.stringify((r._duplicate_ids&&r._duplicate_ids.length?r._duplicate_ids:[r.id]).filter(Boolean)))}" ${r.checked?'disabled':''}></td>
     <td>${r.checked?'<span class="badge assigned">Đã check</span>':'<span class="badge pending">Chưa check</span>'}</td>
     <td>${esc(new Date(r.change_time||Date.now()).toLocaleString())}</td>
     <td>${esc(r.source_row||"")}</td>
     <td>${esc(r.old_project||r.old_value||"")}</td>
     <td style="text-align:center;font-weight:900;color:#f05a28">&gt;</td>
     <td><b>${esc(r.new_project||r.new_value||"")}</b></td>
-    <td>${r.checked?'-':`<button class="green" onclick="markSheetChangesChecked(['${esc(r.id||"")}'])">Đã check</button>`}</td>
+    <td>${r.checked?'-':`<button class="green" onclick="markSheetChangesChecked(${JSON.stringify((r._duplicate_ids&&r._duplicate_ids.length?r._duplicate_ids:[r.id]).filter(Boolean)).replace(/"/g,'&quot;')})">Đã check</button>`}</td>
   </tr>`).join("")||'<tr><td colspan="8" class="muted">Không có tiệm đổi Project phù hợp filter</td></tr>';
 }
 
@@ -3084,7 +3150,15 @@ function toggleSheetChangeCheckAll(checked){
 }
 
 function getSelectedSheetChangeIds(){
-  return [...document.querySelectorAll(".sheet-change-check:checked")].map(cb=>String(cb.value||"").trim()).filter(Boolean);
+  const ids=[];
+  [...document.querySelectorAll(".sheet-change-check:checked")].forEach(cb=>{
+    try{
+      const arr=JSON.parse(cb.dataset.ids||"[]");
+      if(Array.isArray(arr))ids.push(...arr);
+    }catch(_){ }
+    if(cb.value)ids.push(String(cb.value).trim());
+  });
+  return [...new Set(ids.map(x=>String(x||"").trim()).filter(Boolean))];
 }
 
 async function markSelectedSheetChangesChecked(){
