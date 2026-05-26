@@ -717,7 +717,7 @@ td .badge.urgent{margin-top:4px}
       <button data-page="report">📊 Report</button>
       <button data-page="members">👤 Members / AM</button>
       <button data-page="logs">🧾 Audit Logs</button>
-      <button data-page="sheet_changes">🔍 Sheet Changes</button>
+      <button data-page="sheet_changes">🔍 Sheet Changes <span class="nav-count" id="navCountSheetChanges">0</span></button>
       <button data-page="telegram_notify">📣 Gửi lại Tele</button>
       <button data-page="setup">⚙️ Setup</button>
     </div>
@@ -993,7 +993,14 @@ td .badge.urgent{margin-top:4px}
           <div class="sub">Chỉ theo dõi các tiệm đã từng có trong Calendar/tasks bị sửa nội dung cột Project trên Sheet.</div>
         </div>
         <div class="tools">
+          <select id="sheetChangeStatusFilter" onchange="renderSheetChangeLogs(sheetChangeRowsCache,'all',{fromCache:true})" style="width:auto">
+            <option value="unchecked">Chưa check</option>
+            <option value="all">Tất cả</option>
+            <option value="checked">Đã check</option>
+          </select>
           <button onclick="loadSheetChangeLogs()">Load changes</button>
+          <button class="green" onclick="markSelectedSheetChangesChecked()">✅ Đánh dấu đã check</button>
+          <button class="ghost" onclick="markAllVisibleSheetChangesChecked()">Check tất cả đang hiển thị</button>
         </div>
       </div>
       <div class="kpi-compact-row">
@@ -1010,7 +1017,7 @@ td .badge.urgent{margin-top:4px}
         </div>
         <div class="wrap">
           <table>
-            <thead><tr><th>Time</th><th>Source row</th><th>Project cũ</th><th></th><th>Project mới</th></tr></thead>
+            <thead><tr><th><input type="checkbox" id="sheetChangeCheckAll" onchange="toggleSheetChangeCheckAll(this.checked)"></th><th>Time</th><th>Source row</th><th>Project cũ</th><th></th><th>Project mới</th><th>Status</th><th>Action</th></tr></thead>
             <tbody id="sheetChangeBody"></tbody>
           </table>
         </div>
@@ -1269,6 +1276,7 @@ if(!String(settings.settingsProfile||"").trim()&&String(BOOTSTRAP_CONFIG.setting
 }
 let supabaseClient=null,current=new Date(),cache={},queueRows=[],members=[],auditLogs=[];
 let reportDataCache={month:"",loading:false,currentTasks:[],prevTasks:[]};
+let sheetChangeRowsCache=[];
 let selectedQueue=null,selectedDay=null,editingTask=null,editingMember=null,dragTask=null,dragFromDay=null,dragFromIndex=null,contextQueueSourceId=null;
 let queueRenderToken=0;
 let canEdit=localStorage.getItem("tm_canEdit")==="1";
@@ -1570,6 +1578,10 @@ function updateQueueMenuCounts(){
   if(document.getElementById("navCountSkipped"))navCountSkipped.textContent=counts.skipped;
   if(document.getElementById("navCountAll"))navCountAll.textContent=counts.all;
   if(document.getElementById("navCountDomainReported"))navCountDomainReported.textContent=counts.domainReported;
+  if(document.getElementById("navCountSheetChanges")){
+    const unchecked=(sheetChangeRowsCache||[]).filter(r=>!r.checked).length;
+    navCountSheetChanges.textContent=unchecked;
+  }
 }
 function setQueueMenuFilter(value){
   const finalValue=value||"CURRENT";
@@ -1687,6 +1699,18 @@ function showPage(page){
   if(page==="report")renderReport();
   if(page==="members")loadMembers();
   if(page==="logs")loadAuditLogs();
+  if(page==="sheet_changes")loadSheetChangeLogs();
+}
+
+
+function normalizeWebhookUrlForCompare(url){
+  return String(url||"").trim().replace(/\/+$/g,"");
+}
+
+function isTrackingWebhookSameAsTelegram(){
+  const tracking=normalizeWebhookUrlForCompare(settings.trackingWebhook);
+  const telegram=normalizeWebhookUrlForCompare(settings.telegramWebhook);
+  return !!tracking && !!telegram && tracking===telegram;
 }
 
 function buildTrackingPayload(action, payload={}){
@@ -1697,8 +1721,11 @@ function buildTrackingPayload(action, payload={}){
     timestamp:now.toISOString(),
     date:now.toISOString().slice(0,10),
     month:now.toISOString().slice(0,7),
+    tracking_only:true,
+    mode:"tracking",
     action:action||payload.action||"info",
-    event:payload.event||"",
+    event:"tracking",
+    original_event:payload.event||"",
     result:payload.result||"info",
     source_id:payload.source_id||payload.sourceId||"",
     project:payload.project||payload.text||payload.message_project||"",
@@ -1716,13 +1743,22 @@ function buildTrackingPayload(action, payload={}){
     detail:payload.detail||payload.message||"",
     error:payload.error||"",
     payload_json:JSON.stringify(payload||{}).slice(0,45000),
-    app_version:"tracking-v1",
+    app_version:"tracking-v2-no-telegram-route",
     user_agent:navigator.userAgent
   };
 }
 
 async function sendTrackingLog(action,payload={}){
   if(!settings.trackingWebhook)return {skipped:true};
+
+  // Chặn lỗi Telegram bị gửi dư 1 tin chỉ có tiêu đề [TASK NEW]/[AM]...
+  // Nếu Tracking webhook đang dùng chung URL với Telegram webhook, tuyệt đối không POST tracking qua endpoint đó.
+  // Các log quan trọng vẫn đã có trong Supabase: task_audit_logs / telegram_notification_logs.
+  if(isTrackingWebhookSameAsTelegram()){
+    console.warn("Tracking skipped because trackingWebhook equals telegramWebhook", action);
+    return {skipped:true,reason:"tracking_webhook_same_as_telegram"};
+  }
+
   const body=buildTrackingPayload(action,payload);
   try{
     const res=await fetch(settings.trackingWebhook,{
@@ -2978,28 +3014,92 @@ async function loadSheetChangeLogs(){
     const calendarSet=buildCalendarProjectMatchSet(calendarTasks||[]);
     const allLogs=logRes.data||[];
     const matchedLogs=allLogs.filter(r=>sheetProjectChangeMatchesCalendar(r,calendarSet));
+    sheetChangeRowsCache=matchedLogs;
     renderSheetChangeLogs(matchedLogs,"all",{totalLogs:allLogs.length,calendarTasks:(calendarTasks||[]).length});
   }catch(e){
     if(document.getElementById("sheetChangeSummary"))sheetChangeSummary.textContent="Lỗi load sheet_change_logs: "+(e.message||e);
-    if(document.getElementById("sheetChangeBody"))sheetChangeBody.innerHTML='<tr><td colspan="5" class="muted">Chưa có bảng sheet_change_logs hoặc lỗi load. Hãy chạy SQL patch.</td></tr>';
+    if(document.getElementById("sheetChangeBody"))sheetChangeBody.innerHTML='<tr><td colspan="8" class="muted">Chưa có bảng sheet_change_logs hoặc lỗi load. Hãy chạy SQL patch.</td></tr>';
   }
+}
+
+function getSheetChangeStatusFilter(){
+  return document.getElementById("sheetChangeStatusFilter")?.value||"unchecked";
+}
+
+function getVisibleSheetChangeRows(rows){
+  const projectRows=(rows||[]).filter(r=>r.change_type==="project_changed"||r.change_type==="project_code_changed");
+  const filter=getSheetChangeStatusFilter();
+  if(filter==="checked")return projectRows.filter(r=>!!r.checked);
+  if(filter==="unchecked")return projectRows.filter(r=>!r.checked);
+  return projectRows;
 }
 
 function renderSheetChangeLogs(rows,month,meta={}){
   const projectRows=(rows||[]).filter(r=>r.change_type==="project_changed"||r.change_type==="project_code_changed");
+  const visibleRows=getVisibleSheetChangeRows(projectRows);
+  const uncheckedCount=projectRows.filter(r=>!r.checked).length;
+  const checkedCount=projectRows.filter(r=>!!r.checked).length;
+
   if(document.getElementById("sheetChangeTotal"))sheetChangeTotal.textContent=projectRows.length;
-  if(document.getElementById("sheetChangeProjectCode"))sheetChangeProjectCode.textContent=projectRows.length;
+  if(document.getElementById("sheetChangeProjectCode"))sheetChangeProjectCode.textContent=uncheckedCount;
+  if(document.getElementById("navCountSheetChanges"))navCountSheetChanges.textContent=uncheckedCount;
   if(document.getElementById("sheetChangeSummary")){
-    sheetChangeSummary.textContent=`${projectRows.length} tiệm đổi Project có trong Calendar • Calendar ${meta.calendarTasks||0} task • Tổng log đổi Project ${meta.totalLogs||projectRows.length}`;
+    sheetChangeSummary.textContent=`${projectRows.length} tiệm đổi Project có trong Calendar • Chưa check ${uncheckedCount} • Đã check ${checkedCount} • Calendar ${meta.calendarTasks||0} task • Tổng log đổi Project ${meta.totalLogs||projectRows.length}`;
   }
   if(!document.getElementById("sheetChangeBody"))return;
-  sheetChangeBody.innerHTML=projectRows.map(r=>`<tr>
+
+  sheetChangeBody.innerHTML=visibleRows.map(r=>`<tr class="${r.checked?'queue-row-assigned':''}">
+    <td><input type="checkbox" class="sheet-change-check" value="${esc(r.id||'')}" ${r.checked?'disabled':''}></td>
     <td>${esc(new Date(r.change_time||Date.now()).toLocaleString())}</td>
     <td>${esc(r.source_row||"")}</td>
     <td>${esc(r.old_project||r.old_value||"")}</td>
     <td style="text-align:center;font-weight:900;color:#f05a28">&gt;</td>
     <td><b>${esc(r.new_project||r.new_value||"")}</b></td>
-  </tr>`).join("")||'<tr><td colspan="5" class="muted">Chưa có tiệm nào có trong Calendar bị đổi Project</td></tr>';
+    <td>${r.checked?`<span class="badge assigned">Đã check</span><div class="muted">${esc(r.checked_at?new Date(r.checked_at).toLocaleString():"")}</div>`:`<span class="badge pending">Chưa check</span>`}</td>
+    <td>${r.checked?"-":`<button class="green" onclick='markSheetChangesChecked([${JSON.stringify(r.id)}])'>Đã check</button>`}</td>
+  </tr>`).join("")||'<tr><td colspan="8" class="muted">Không có tiệm đổi Project theo bộ lọc hiện tại</td></tr>';
+}
+
+function toggleSheetChangeCheckAll(checked){
+  document.querySelectorAll(".sheet-change-check:not(:disabled)").forEach(cb=>cb.checked=checked);
+}
+
+function getSelectedSheetChangeIds(){
+  return [...document.querySelectorAll(".sheet-change-check:checked")]
+    .map(cb=>cb.value)
+    .filter(Boolean);
+}
+
+async function markSelectedSheetChangesChecked(){
+  const ids=getSelectedSheetChangeIds();
+  if(!ids.length){toast("Chưa chọn dòng Project Changed nào", "#8a6d00");return;}
+  await markSheetChangesChecked(ids);
+}
+
+async function markAllVisibleSheetChangesChecked(){
+  const ids=getVisibleSheetChangeRows(sheetChangeRowsCache)
+    .filter(r=>!r.checked&&r.id)
+    .map(r=>r.id);
+  if(!ids.length){toast("Không có dòng chưa check trong danh sách hiện tại", "#8a6d00");return;}
+  if(!confirm(`Đánh dấu đã check ${ids.length} tiệm đổi Project đang hiển thị?`))return;
+  await markSheetChangesChecked(ids);
+}
+
+async function markSheetChangesChecked(ids){
+  if(!requireDb())return;
+  const clean=[...new Set((ids||[]).filter(Boolean))];
+  if(!clean.length)return;
+  const nowIso=new Date().toISOString();
+  for(const chunk of chunkList(clean,100)){
+    const {error}=await supabaseClient
+      .from("sheet_change_logs")
+      .update({checked:true,checked_at:nowIso,checked_by:"manual"})
+      .in("id",chunk);
+    if(error){toast("Lỗi đánh dấu đã check: "+error.message,"#b71c1c");return;}
+  }
+  sheetChangeRowsCache=(sheetChangeRowsCache||[]).map(r=>clean.includes(r.id)?{...r,checked:true,checked_at:nowIso,checked_by:"manual"}:r);
+  renderSheetChangeLogs(sheetChangeRowsCache,"all",{fromCache:true});
+  toast(`Đã đánh dấu check ${clean.length} tiệm`, "#2e7d32");
 }
 
 
