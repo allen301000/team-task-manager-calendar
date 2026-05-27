@@ -5438,7 +5438,7 @@ async function toggleDone(t){
 
   if(t.done){
     const queueRow=await getQueueRowForDoneTask(t);
-    const doneNotice=buildDoneAmNoticeText(t,queueRow);
+    const doneNotice=await buildDoneAmNoticeText(t,queueRow);
     await logAction("done",t.id,t.source_id||"",t.text,t.person,doneNotice,t.am);
     await notifyOneDoneTask(t,queueRow,"calendar_done");
   }else{
@@ -6066,16 +6066,76 @@ function normalizeTaskDemoLink(domain){
   return /\/home(?:\/)?$/i.test(withScheme)?withScheme:`${withScheme}/home`;
 }
 
-function buildDoneAmNoticeText(task, queueRow={}){
+function loadGasJsonp(action, params = {}){
+  return new Promise((resolve, reject)=>{
+    if(!settings.sheetApi){
+      reject(new Error("Chưa nhập Apps Script API URL"));
+      return;
+    }
+
+    const cb="gasCb_"+Date.now()+"_"+Math.floor(Math.random()*100000);
+    const sep=settings.sheetApi.includes("?")?"&":"?";
+    const query=new URLSearchParams({action,callback:cb,...params});
+    const url=`${settings.sheetApi}${sep}${query.toString()}`;
+    const script=document.createElement("script");
+
+    const timer=setTimeout(()=>{
+      cleanup();
+      reject(new Error("GAS domain_lookup timeout"));
+    },20000);
+
+    function cleanup(){
+      clearTimeout(timer);
+      delete window[cb];
+      if(script.parentNode)script.parentNode.removeChild(script);
+    }
+
+    window[cb]=data=>{
+      cleanup();
+      resolve(data);
+    };
+
+    script.onerror=()=>{
+      cleanup();
+      reject(new Error("Không gọi được GAS domain_lookup"));
+    };
+
+    script.src=url;
+    document.body.appendChild(script);
+  });
+}
+
+async function getDoneDomainFromInfo(project){
+  const taskName=String(project||"").trim();
+  if(!taskName)return {domain:"",demo_link:""};
+
+  try{
+    const res=await loadGasJsonp("domain_lookup",{q:taskName});
+    if(!res||res.success===false)return {domain:"",demo_link:""};
+    return {
+      domain:String(res.domain||"").trim(),
+      demo_link:String(res.demo_link||"").trim()
+    };
+  }catch(e){
+    logDebug("⚠️ Lấy domain từ tab Info qua GAS lỗi",{project:taskName,error:e?.message||String(e)});
+    return {domain:"",demo_link:""};
+  }
+}
+
+async function buildDoneAmNoticeText(task, queueRow={}){
   const project=String(task.text||queueRow.project||task.source_id||queueRow.source_id||"").trim();
   const person=String(task.person||"").trim();
-  const rawDomain=String(queueRow.domain_url||queueRow.domain||task.domain_url||task.domain||"").trim();
-  const demoLink=normalizeTaskDemoLink(rawDomain);
+
+  // DONE: app cũng lấy domain từ tab Info qua GAS, không lấy domain_url trong task_queue nữa.
+  const infoDomain=await getDoneDomainFromInfo(project);
+  const demoLink=infoDomain.demo_link||"";
+
   return `[AM] TASK HOÀN THÀNH\n👉 Từ: ${person}\n${project}${demoLink?`\nDemo Link: ${demoLink}`:""}`;
 }
 
 async function notifyOneDoneTask(task, queueRow={}, context="manual_resend_done"){
   await ensureMembersReadyForNotify();
+
   const sourceId=String(task.source_id||queueRow.source_id||"").trim();
   const project=String(task.text||queueRow.project||sourceId).trim();
   const person=String(task.person||"").trim();
@@ -6085,49 +6145,113 @@ async function notifyOneDoneTask(task, queueRow={}, context="manual_resend_done"
   const amChatId=String(amMember?.telegram_chat_id||"").trim();
   const taskDate=String(task.task_date||"").slice(0,10);
   const type=String(task.type||pickAssignTypeFromProject(project)).trim();
-  const rawDomain=String(queueRow.domain_url||queueRow.domain||task.domain_url||task.domain||"").trim();
-  const demoLink=normalizeTaskDemoLink(rawDomain);
-  const result={web_sent:0,am_sent:0,missing_web:0,missing_am:0,failed:0,done_notice:buildDoneAmNoticeText({...task,person},queueRow)};
+
+  // DONE: lấy domain/demo_link từ tab Info qua GAS.
+  const infoDomain=await getDoneDomainFromInfo(project);
+  const rawDomain=infoDomain.domain||"";
+  const demoLink=infoDomain.demo_link||"";
+  const doneNotice=await buildDoneAmNoticeText({...task,person},queueRow);
+
+  const result={
+    web_sent:0,
+    am_sent:0,
+    missing_web:0,
+    missing_am:0,
+    failed:0,
+    done_notice:doneNotice
+  };
 
   if(!am || am==="None"){
     result.missing_am++;
-    await recordTelegramNotifyLog({context,recipient:"am",status:"missing",source_id:sourceId,task_id:task.id||null,task_date:taskDate,project,person,am,error:"Missing AM",detail:buildTelegramContentPreview({event:"done",recipient:"am",project,person,am,domain_url:rawDomain,demo_link:demoLink,message:project},"am")});
+    await recordTelegramNotifyLog({
+      context,
+      recipient:"am",
+      status:"missing",
+      source_id:sourceId,
+      task_id:task.id||null,
+      task_date:taskDate,
+      project,
+      person,
+      am,
+      error:"Missing AM",
+      detail:doneNotice
+    });
     return result;
   }
 
   if(!amChatId){
     result.missing_am++;
-    await recordTelegramNotifyLog({context,recipient:"am",status:"missing",source_id:sourceId,task_id:task.id||null,task_date:taskDate,project,person,am,error:"Missing AM telegram_chat_id",detail:buildTelegramContentPreview({...payload,recipient:"am"},"am"),detail:buildTelegramContentPreview({event:"done",recipient:"am",project,person,am,domain_url:rawDomain,demo_link:demoLink,message:project},"am")});
+    await recordTelegramNotifyLog({
+      context,
+      recipient:"am",
+      status:"missing",
+      source_id:sourceId,
+      task_id:task.id||null,
+      task_date:taskDate,
+      project,
+      person,
+      am,
+      error:"Missing AM telegram_chat_id",
+      detail:doneNotice
+    });
     logDebug("⚠️ Không gửi được Telegram done cho AM vì thiếu telegram_chat_id",{source_id:sourceId,project,am});
     return result;
   }
 
+  const donePayload={
+    event:"done",
+    context,
+    recipient:"am",
+    source_id:sourceId,
+    task_id:task.id||null,
+    project,
+    task_date:taskDate,
+    result:"success",
+    person,
+    am,
+    type,
+    domain_url:rawDomain,
+    demo_link:demoLink,
+    person_chat_id:"",
+    am_chat_id:amChatId,
+    message:project
+  };
+
   try{
-    await sendTelegram({
-      event:"done",
+    await sendTelegram(donePayload);
+    result.am_sent++;
+    await recordTelegramNotifyLog({
       context,
       recipient:"am",
+      status:"success",
       source_id:sourceId,
       task_id:task.id||null,
-      project,
       task_date:taskDate,
-      result:"success",
+      project,
       person,
       am,
-      type,
-      domain_url:rawDomain,
-      demo_link:demoLink,
-      person_chat_id:"",
-      am_chat_id:amChatId,
-      message:project
+      chat_id:amChatId,
+      detail:doneNotice
     });
-    result.am_sent++;
-    await recordTelegramNotifyLog({context,recipient:"am",status:"success",source_id:sourceId,task_id:task.id||null,task_date:taskDate,project,person,am,chat_id:amChatId,detail:buildTelegramContentPreview({event:"done",recipient:"am",project,person,am,domain_url:rawDomain,demo_link:demoLink,message:project},"am")});
   }catch(e){
     result.failed++;
-    await recordTelegramNotifyLog({context,recipient:"am",status:"failed",source_id:sourceId,task_id:task.id||null,task_date:taskDate,project,person,am,chat_id:amChatId,error:e?.message||String(e)});
+    await recordTelegramNotifyLog({
+      context,
+      recipient:"am",
+      status:"failed",
+      source_id:sourceId,
+      task_id:task.id||null,
+      task_date:taskDate,
+      project,
+      person,
+      am,
+      chat_id:amChatId,
+      error:e?.message||String(e),
+      detail:doneNotice
+    });
     logDebug("⚠️ Gửi Telegram done cho AM lỗi",{source_id:sourceId,project,am,chat_id:amChatId,error:e?.message||String(e)});
   }
+
   return result;
 }
 
@@ -6167,7 +6291,7 @@ async function sendOneAssignTelegramNotification(payload, webMember, amMember, o
       }
     }else{
       result.missing_am++;
-      await recordTelegramNotifyLog({context,recipient:"am",status:"missing",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,error:"Missing AM telegram_chat_id",detail:buildTelegramContentPreview({...payload,recipient:"am"},"am"),detail:buildTelegramContentPreview({event:"done",recipient:"am",project,person,am,domain_url:rawDomain,demo_link:demoLink,message:project},"am")});
+      await recordTelegramNotifyLog({context,recipient:"am",status:"missing",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,error:"Missing AM telegram_chat_id",detail:buildTelegramContentPreview({...payload,recipient:"am"},"am")});
       logDebug("⚠️ Không gửi được Telegram cho AM vì thiếu telegram_chat_id",{source_id:payload.source_id,project:payload.project,am:payload.am});
     }
   }
