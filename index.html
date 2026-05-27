@@ -6192,7 +6192,7 @@ Type: ${type}
 Member: ${person}
 AM: ${am}
 📅 ${taskDate}`;
-  const payload={event:context==="manual_resend"?"resend_assign":"new",context,source_id:sourceId,task_id:task.id||null,project,task_date:taskDate,result:"success",person,am,type,message:msg};
+  const payload={event:"new",context,source_id:sourceId,task_id:task.id||null,project,task_date:taskDate,result:"success",person,am,type,message:msg};
   return await sendOneAssignTelegramNotification(payload,webMember,amMember,{context});
 }
 
