@@ -1044,6 +1044,11 @@ td .badge.urgent{margin-top:4px}
             <option value="assign">Thông báo assign task</option>
             <option value="done">Thông báo task done</option>
           </select>
+          <select id="resendNotifyTarget" style="width:auto" onchange="renderResendNotifyTasks()">
+            <option value="both">Gửi Web + AM</option>
+            <option value="web">Chỉ gửi Web</option>
+            <option value="am">Chỉ gửi AM</option>
+          </select>
           <button onclick="loadResendNotifyTasks()">Load task trong ngày</button>
           <button class="primary" onclick="resendTelegramForSelectedTasks()">Gửi lại Tele đã chọn</button>
           <button class="ghost" onclick="loadTelegramNotifyLogs()">Reload log</button>
@@ -4206,19 +4211,25 @@ async function assignQueueTask(){
     return;
   }
 
-  const msg=`Project: ${text}\nType: ${type}\n\nMember: ${person}\nAM: ${am}\n📅 ${taskDate}`;
-
-  await sendTelegram({
-    event:"new",
+  const notifyResult=await notifyOneAssignedTask({
+    id:taskId,
+    source_id:sourceId,
+    text,
     person,
-    person_chat_id:webMember?.telegram_chat_id||"",
-    am,
-    am_chat_id:amMember?.telegram_chat_id||"",
+    task_date:taskDate,
     type,
-    message:msg
-  });
+    am
+  }, selectedQueue, "manual_assign");
 
-  await logAction("assign",taskId,sourceId,text,person,`Assigned to ${person} / AM ${am}`,am);
+  await logAction(
+    "assign",
+    taskId,
+    sourceId,
+    text,
+    person,
+    `Assigned to ${person} / AM ${am}. Telegram Web ${notifyResult.web_sent||0}, AM ${notifyResult.am_sent||0}, missing ${Number(notifyResult.missing_web||0)+Number(notifyResult.missing_am||0)}, failed ${notifyResult.failed||0}`,
+    am
+  );
 
   closeModal("assignModal");
   toast("Đã add vào calendar","#2e7d32");
@@ -5359,28 +5370,15 @@ async function saveTaskFromModal(){
 
     await logAction("manual_add",taskId,"",p.text,p.person,"Manual add",p.am);
 
-    const personM=memberByName(p.person);
-    const amM=memberByName(p.am);
-
-    await sendTelegram({
-      event:"new",
+    await notifyOneAssignedTask({
+      id:taskId,
+      source_id:"",
+      text:p.text,
       person:p.person,
-      person_chat_id:personM?.telegram_chat_id||"",
-      am:p.am,
-      am_chat_id:amM?.telegram_chat_id||"",
+      task_date,
       type:p.type,
-      message:
-        `Project: ${p.text}
-`+
-        `Type: ${p.type}
-
-`+
-        `Member: ${p.person}
-`+
-        `AM: ${p.am}
-`+
-        `📅 ${task_date}`
-    });
+      am:p.am
+    }, {}, "manual_add");
   }
 
   closeModal("taskModal");
@@ -6256,13 +6254,16 @@ async function notifyOneDoneTask(task, queueRow={}, context="manual_resend_done"
 }
 
 async function sendOneAssignTelegramNotification(payload, webMember, amMember, options={}){
-  const result={web_sent:0,am_sent:0,missing_web:0,missing_am:0,failed:0};
+  const result={web_sent:0,am_sent:0,missing_web:0,missing_am:0,failed:0,skipped_web:0,skipped_am:0};
   const context=options.context||payload.context||"assign_batch";
   const taskId=payload.task_id||null;
+  const target=String(options.target||payload.resend_target||"both").toLowerCase();
+  const sendWeb=target==="both"||target==="all"||target==="web"||target==="member"||target==="person";
+  const sendAm=target==="both"||target==="all"||target==="am";
   const webChatId=String(webMember?.telegram_chat_id||"").trim();
   const amChatId=String(amMember?.telegram_chat_id||"").trim();
 
-  if(webChatId){
+  if(sendWeb && webChatId){
     try{
       await sendTelegram({...payload,recipient:"web",person_chat_id:webChatId,am_chat_id:""});
       result.web_sent++;
@@ -6272,13 +6273,15 @@ async function sendOneAssignTelegramNotification(payload, webMember, amMember, o
       await recordTelegramNotifyLog({context,recipient:"web",status:"failed",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,chat_id:webChatId,error:e?.message||String(e)});
       logDebug("⚠️ Gửi Telegram cho Web lỗi",{source_id:payload.source_id,project:payload.project,person:payload.person,chat_id:webChatId,error:e?.message||String(e)});
     }
-  }else{
+  }else if(sendWeb){
     result.missing_web++;
     await recordTelegramNotifyLog({context,recipient:"web",status:"missing",source_id:payload.source_id,task_id:taskId,task_date:payload.task_date,project:payload.project,person:payload.person,am:payload.am,error:"Missing Web telegram_chat_id",detail:buildTelegramContentPreview({...payload,recipient:"web"},"web")});
     logDebug("⚠️ Không gửi được Telegram cho Web vì thiếu telegram_chat_id",{source_id:payload.source_id,project:payload.project,person:payload.person});
+  }else{
+    result.skipped_web++;
   }
 
-  if(String(payload.am||"").trim() && String(payload.am||"").trim()!=="None"){
+  if(sendAm && String(payload.am||"").trim() && String(payload.am||"").trim()!=="None"){
     if(amChatId){
       try{
         await sendTelegram({...payload,recipient:"am",person_chat_id:"",am_chat_id:amChatId});
@@ -6298,7 +6301,7 @@ async function sendOneAssignTelegramNotification(payload, webMember, amMember, o
   return result;
 }
 
-async function notifyOneAssignedTask(task, queueRow={}, context="manual_resend"){
+async function notifyOneAssignedTask(task, queueRow={}, context="manual_resend", target="both"){
   await ensureMembersReadyForNotify();
   const sourceId=String(task.source_id||queueRow.source_id||"").trim();
   const project=String(task.text||queueRow.project||sourceId).trim();
@@ -6316,8 +6319,8 @@ Type: ${type}
 Member: ${person}
 AM: ${am}
 📅 ${taskDate}`;
-  const payload={event:"new",context,source_id:sourceId,task_id:task.id||null,project,task_date:taskDate,result:"success",person,am,type,message:msg};
-  return await sendOneAssignTelegramNotification(payload,webMember,amMember,{context});
+  const payload={event:"new",context,source_id:sourceId,task_id:task.id||null,project,task_date:taskDate,result:"success",person,am,type,message:msg,resend_target:target};
+  return await sendOneAssignTelegramNotification(payload,webMember,amMember,{context,target});
 }
 
 async function loadQueueRowsBySourceIds(ids){
@@ -6356,7 +6359,9 @@ function renderResendNotifyTasks(){
   }
   if(document.getElementById("resendNotifySummary")){
     const mode=document.getElementById("resendNotifyMode")?.value||"assign";
-    resendNotifySummary.textContent=`${rows.length}/${resendNotifyRows.length} task trong ngày ${document.getElementById("resendNotifyDate")?.value||todayStr()} • Chế độ: ${mode==="done"?"Gửi thông báo task done":"Gửi thông báo assign task"}`;
+    const target=document.getElementById("resendNotifyTarget")?.value||"both";
+    const targetLabel=target==="web"?"Chỉ Web":target==="am"?"Chỉ AM":"Web + AM";
+    resendNotifySummary.textContent=`${rows.length}/${resendNotifyRows.length} task trong ngày ${document.getElementById("resendNotifyDate")?.value||todayStr()} • Chế độ: ${mode==="done"?"Gửi thông báo task done":"Gửi thông báo assign task"} • Người nhận: ${targetLabel}`;
   }
   body.innerHTML=rows.map((x,idx)=>{
     const t=x.task,qrow=x.queue||{};
@@ -6390,7 +6395,13 @@ async function resendTelegramForSelectedTasks(){
   const rows=resendNotifyRows.filter(x=>selected.includes(String(x.task.id)));
   if(!rows.length){toast("Không tìm thấy task đã chọn", "#b71c1c");return;}
   const mode=document.getElementById("resendNotifyMode")?.value||"assign";
-  const label=mode==="done"?"thông báo task done cho AM":"thông báo assign task cho Web/AM";
+  const target=document.getElementById("resendNotifyTarget")?.value||"both";
+  const targetLabel=target==="web"?"Web":target==="am"?"AM":"Web + AM";
+  if(mode==="done" && target==="web"){
+    toast("Thông báo task done chỉ gửi cho AM. Hãy chọn Chỉ gửi AM hoặc Web + AM.", "#8a6d00");
+    return;
+  }
+  const label=mode==="done"?`thông báo task done cho ${target==="both"?"AM":targetLabel}`:`thông báo assign task cho ${targetLabel}`;
   if(!confirm(`Gửi lại ${label} cho ${rows.length} task trong ngày ${document.getElementById("resendNotifyDate")?.value||""}?`))return;
   clearDebug();
   let total={web_sent:0,am_sent:0,missing_web:0,missing_am:0,failed:0};
@@ -6399,28 +6410,28 @@ async function resendTelegramForSelectedTasks(){
     try{
       const r=mode==="done"
         ? await notifyOneDoneTask(x.task,x.queue,"manual_resend_done")
-        : await notifyOneAssignedTask(x.task,x.queue,"manual_resend");
+        : await notifyOneAssignedTask(x.task,x.queue,"manual_resend",target);
       total.web_sent+=r.web_sent||0;
       total.am_sent+=r.am_sent||0;
       total.missing_web+=r.missing_web||0;
       total.missing_am+=r.missing_am||0;
       total.failed+=r.failed||0;
-      x.last_web=mode==="done"?"-":(r.web_sent?"sent":(r.missing_web?"missing":"-"));
-      x.last_am=r.am_sent?"sent":(r.missing_am?"missing":"-");
+      x.last_web=mode==="done"?"-":(target==="am"?"skipped":(r.web_sent?"sent":(r.missing_web?"missing":"-")));
+      x.last_am=(mode==="assign"&&target==="web")?"skipped":(r.am_sent?"sent":(r.missing_am?"missing":"-"));
       x.last_error=r.failed?"failed":"";
-      await logAction(mode==="done"?"telegram_resend_done":"telegram_resend",x.task.id||null,x.task.source_id||"",x.task.text||x.queue.project||"",x.task.person||"",mode==="done"?(r.done_notice||"Manual resend done notice to AM"):`Manual resend assign Telegram. Web ${x.last_web}, AM ${x.last_am}`,x.task.am||x.queue.am||"");
+      await logAction(mode==="done"?"telegram_resend_done":"telegram_resend",x.task.id||null,x.task.source_id||"",x.task.text||x.queue.project||"",x.task.person||"",mode==="done"?(r.done_notice||"Manual resend done notice to AM"):`Manual resend assign Telegram. Target ${targetLabel}. Web ${x.last_web}, AM ${x.last_am}`,x.task.am||x.queue.am||"");
     }catch(e){
       total.failed++;
       x.last_error=e?.message||String(e);
       logDebug("⚠️ Gửi lại Telegram lỗi",{source_id:x.task.source_id,project:x.task.text,mode,error:x.last_error});
     }
-    toast(`Đang gửi lại ${i+1}/${rows.length}. Web ${total.web_sent}, AM ${total.am_sent}, lỗi ${total.failed}`, "#f05a28");
+    toast(`Đang gửi lại ${i+1}/${rows.length} (${targetLabel}). Web ${total.web_sent}, AM ${total.am_sent}, lỗi ${total.failed}`, "#f05a28");
     renderResendNotifyTasks();
     await yieldUi();
   }
   await loadTelegramNotifyLogs();
   renderResendNotifyTasks();
-  toast(`Gửi lại xong. Web ${total.web_sent}, AM ${total.am_sent}, thiếu ID ${total.missing_web+total.missing_am}, lỗi ${total.failed}`, total.failed?"#8a6d00":"#2e7d32");
+  toast(`Gửi lại xong (${targetLabel}). Web ${total.web_sent}, AM ${total.am_sent}, thiếu ID ${total.missing_web+total.missing_am}, lỗi ${total.failed}`, total.failed?"#8a6d00":"#2e7d32");
 }
 
 async function sendBulkAssignNotifications(assignedRows, originalQueueRows=[]){
