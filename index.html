@@ -5572,66 +5572,117 @@ async function saveTaskFromModal(){
       `Note: ${oldTask.note||""} → ${p.note||""}`
     ].join("\n");
 
-    const newPersonM=memberByName(p.person);
-    const newAmM=memberByName(p.am);
+    const newPersonM=findMemberLooseByName(p.person,["WEB","BOTH"])||memberByName(p.person);
+    const newAmM=findMemberLooseByName(p.am,["AM","BOTH"])||memberByName(p.am);
 
-    await sendTelegram({
+    // UPDATE: gửi riêng Web và AM để nếu một bên thiếu/sai Telegram ID thì bên còn lại vẫn nhận được.
+    const updatePayload={
       event:"update",
+      context:"calendar_update",
+      source_id:editingTask.source_id||oldTask.source_id||"",
+      task_id:editingTask.id,
+      project:p.text,
+      task_date:oldTask.task_date||task_date,
       person:p.person,
-      person_chat_id:newPersonM?.telegram_chat_id||"",
       am:p.am,
-      am_chat_id:newAmM?.telegram_chat_id||"",
       type:p.type,
       message:changeLines
-    });
+    };
 
+    const updateNotifyResult=await sendOneAssignTelegramNotification(
+      updatePayload,
+      newPersonM,
+      newAmM,
+      {context:"calendar_update",target:"both"}
+    );
+
+    // Nếu đổi Web, báo thêm cho Web cũ biết task đã được chuyển người.
+    let oldPersonNotifyResult=null;
     if(oldTask.person && oldTask.person!==p.person){
-      const oldPersonM=memberByName(oldTask.person);
-      await sendTelegram({
-        event:"update",
-        person:oldTask.person,
-        person_chat_id:oldPersonM?.telegram_chat_id||"",
-        am:"",
-        am_chat_id:"",
-        type:p.type,
-        message:
-          `Project: ${oldTask.text||""}
+      const oldPersonM=findMemberLooseByName(oldTask.person,["WEB","BOTH"])||memberByName(oldTask.person);
+      const oldPersonMessage=
+        `Project: ${oldTask.text||""}
 `+
-          `Action: TASK REASSIGNED
+        `Action: TASK REASSIGNED
 
 `+
-          `Old Member: ${oldTask.person}
+        `Old Member: ${oldTask.person}
 `+
-          `New Member: ${p.person}
+        `New Member: ${p.person}
 `+
-          `Date: ${oldTask.task_date||task_date}`
-      });
+        `Date: ${oldTask.task_date||task_date}`;
+
+      oldPersonNotifyResult=await sendOneAssignTelegramNotification(
+        {
+          event:"update",
+          context:"calendar_update_old_web",
+          source_id:editingTask.source_id||oldTask.source_id||"",
+          task_id:editingTask.id,
+          project:oldTask.text||p.text,
+          task_date:oldTask.task_date||task_date,
+          person:oldTask.person,
+          am:"",
+          type:p.type,
+          message:oldPersonMessage
+        },
+        oldPersonM,
+        null,
+        {context:"calendar_update_old_web",target:"web"}
+      );
     }
 
-    if(oldTask.am && oldTask.am!==p.am){
-      const oldAmM=memberByName(oldTask.am);
-      await sendTelegram({
-        event:"update",
-        person:p.person,
-        person_chat_id:"",
-        am:oldTask.am,
-        am_chat_id:oldAmM?.telegram_chat_id||"",
-        type:p.type,
-        message:
-          `Project: ${oldTask.text||""}
+    // Nếu đổi AM, báo thêm cho AM cũ biết task đã đổi AM.
+    let oldAmNotifyResult=null;
+    if(oldTask.am && oldTask.am!==p.am && String(oldTask.am).trim()!=="None"){
+      const oldAmM=findMemberLooseByName(oldTask.am,["AM","BOTH"])||memberByName(oldTask.am);
+      const oldAmMessage=
+        `Project: ${oldTask.text||""}
 `+
-          `Action: AM CHANGED
+        `Action: AM CHANGED
 
 `+
-          `Old AM: ${oldTask.am}
+        `Old AM: ${oldTask.am}
 `+
-          `New AM: ${p.am}
+        `New AM: ${p.am}
 `+
-          `Member: ${p.person}
+        `Member: ${p.person}
 `+
-          `Date: ${oldTask.task_date||task_date}`
-      });
+        `Date: ${oldTask.task_date||task_date}`;
+
+      oldAmNotifyResult=await sendOneAssignTelegramNotification(
+        {
+          event:"update",
+          context:"calendar_update_old_am",
+          source_id:editingTask.source_id||oldTask.source_id||"",
+          task_id:editingTask.id,
+          project:oldTask.text||p.text,
+          task_date:oldTask.task_date||task_date,
+          person:p.person,
+          am:oldTask.am,
+          type:p.type,
+          message:oldAmMessage
+        },
+        null,
+        oldAmM,
+        {context:"calendar_update_old_am",target:"am"}
+      );
     }
+
+    await logAction(
+      "telegram_update_result",
+      editingTask.id,
+      editingTask.source_id||oldTask.source_id||"",
+      p.text,
+      p.person,
+      `Update Telegram result. New Web sent: ${updateNotifyResult.web_sent||0}, New AM sent: ${updateNotifyResult.am_sent||0}, missing Web: ${updateNotifyResult.missing_web||0}, missing AM: ${updateNotifyResult.missing_am||0}, failed: ${updateNotifyResult.failed||0}`+
+        (oldPersonNotifyResult?`
+Old Web result: sent ${oldPersonNotifyResult.web_sent||0}, missing ${oldPersonNotifyResult.missing_web||0}, failed ${oldPersonNotifyResult.failed||0}`:"")+
+        (oldAmNotifyResult?`
+Old AM result: sent ${oldAmNotifyResult.am_sent||0}, missing ${oldAmNotifyResult.missing_am||0}, failed ${oldAmNotifyResult.failed||0}`:"")+`
+
+${changeLines}`,
+      p.am
+    );
 
     await logAction(
       "update",
@@ -5824,7 +5875,8 @@ async function reorderInDay(day,target){if(!dragTask||day!==dragFromDay)return;c
 async function dropToOtherDay(day){
   if(!dragTask||day===dragFromDay)return;
 
-  const oldDate=dragTask.task_date;
+  const movedTask={...dragTask};
+  const oldDate=movedTask.task_date;
   const oldDay=dragFromDay;
 
   cache[dragFromDay]=cache[dragFromDay].filter(t=>t!==dragTask);
@@ -5837,7 +5889,7 @@ async function dropToOtherDay(day){
 
   renderCalendarOnly();
 
-  await supabaseClient
+  const {error:updateErr}=await supabaseClient
     .from("tasks")
     .update({
       task_date:newDate,
@@ -5845,44 +5897,146 @@ async function dropToOtherDay(day){
     })
     .eq("id",dragTask.id);
 
-  const detailMessage=
-    `Project: ${dragTask.text}
-`+
-    `Action: TASK MOVED
+  if(updateErr){
+    toast("Lỗi đổi ngày task: "+updateErr.message,"#b71c1c");
+    logDebug("MOVE TASK DB ERROR", updateErr.message||String(updateErr));
+    await render();
+    dragTask=null;
+    return;
+  }
 
-`+
-    `Old Date: ${oldDate||""}
-`+
-    `New Date: ${newDate}
-`+
-    `Member: ${dragTask.person||""}
-`+
-    `AM: ${dragTask.am||""}`;
+  const detailMessage=
+    `Project: ${movedTask.text||""}\n`+
+    `Action: TASK MOVED\n\n`+
+    `Old Date: ${oldDate||oldDay||""}\n`+
+    `New Date: ${newDate}\n`+
+    `Member: ${movedTask.person||""}\n`+
+    `AM: ${movedTask.am||""}`;
 
   await logAction(
     "move",
-    dragTask.id,
-    dragTask.source_id||"",
-    dragTask.text,
-    dragTask.person,
-    `Moved from ${oldDate||oldDay} to ${newDate}`,
-    dragTask.am
+    movedTask.id,
+    movedTask.source_id||"",
+    movedTask.text||"",
+    movedTask.person||"",
+    detailMessage,
+    movedTask.am||""
   );
 
-  const personM=memberByName(dragTask.person);
-  const amM=memberByName(dragTask.am);
+  const personM=findMemberLooseByName(movedTask.person,["WEB","BOTH"])||memberByName(movedTask.person);
+  const amM=findMemberLooseByName(movedTask.am,["AM","BOTH"])||memberByName(movedTask.am);
 
-  await sendTelegram({
-    event:"move",
-    person:dragTask.person,
-    person_chat_id:personM?.telegram_chat_id||"",
-    am:dragTask.am,
-    am_chat_id:amM?.telegram_chat_id||"",
-    message:detailMessage
-  });
+  let webStatus="skipped";
+  let amStatus="skipped";
+  let failed=0;
+
+  // Gửi riêng cho Web để nếu AM thiếu/sai chat ID thì Web vẫn nhận được.
+  if(String(personM?.telegram_chat_id||"").trim()){
+    try{
+      await sendTelegram({
+        event:"move",
+        context:"calendar_move",
+        recipient:"web",
+        source_id:movedTask.source_id||"",
+        task_id:movedTask.id||null,
+        project:movedTask.text||"",
+        task_date:newDate,
+        person:movedTask.person||"",
+        person_chat_id:personM.telegram_chat_id,
+        am:movedTask.am||"",
+        am_chat_id:"",
+        message:detailMessage
+      });
+      webStatus="sent";
+    }catch(e){
+      failed++;
+      webStatus="failed";
+      logDebug("⚠️ Gửi Telegram MOVE cho Web lỗi",{
+        project:movedTask.text,
+        person:movedTask.person,
+        chat_id:personM.telegram_chat_id,
+        error:e?.message||String(e)
+      });
+    }
+  }else{
+    webStatus="missing";
+    await recordTelegramNotifyLog({
+      context:"calendar_move",
+      recipient:"web",
+      status:"missing",
+      source_id:movedTask.source_id||"",
+      task_id:movedTask.id||null,
+      task_date:newDate,
+      project:movedTask.text||"",
+      person:movedTask.person||"",
+      am:movedTask.am||"",
+      error:"Missing Web telegram_chat_id",
+      detail:buildTelegramContentPreview({event:"move",message:detailMessage,person:movedTask.person,am:movedTask.am,project:movedTask.text},"web")
+    });
+  }
+
+  // Gửi riêng cho AM nếu có AM hợp lệ.
+  if(String(movedTask.am||"").trim() && String(movedTask.am||"").trim()!=="None"){
+    if(String(amM?.telegram_chat_id||"").trim()){
+      try{
+        await sendTelegram({
+          event:"move",
+          context:"calendar_move",
+          recipient:"am",
+          source_id:movedTask.source_id||"",
+          task_id:movedTask.id||null,
+          project:movedTask.text||"",
+          task_date:newDate,
+          person:movedTask.person||"",
+          person_chat_id:"",
+          am:movedTask.am||"",
+          am_chat_id:amM.telegram_chat_id,
+          message:detailMessage
+        });
+        amStatus="sent";
+      }catch(e){
+        failed++;
+        amStatus="failed";
+        logDebug("⚠️ Gửi Telegram MOVE cho AM lỗi",{
+          project:movedTask.text,
+          am:movedTask.am,
+          chat_id:amM.telegram_chat_id,
+          error:e?.message||String(e)
+        });
+      }
+    }else{
+      amStatus="missing";
+      await recordTelegramNotifyLog({
+        context:"calendar_move",
+        recipient:"am",
+        status:"missing",
+        source_id:movedTask.source_id||"",
+        task_id:movedTask.id||null,
+        task_date:newDate,
+        project:movedTask.text||"",
+        person:movedTask.person||"",
+        am:movedTask.am||"",
+        error:"Missing AM telegram_chat_id",
+        detail:buildTelegramContentPreview({event:"move",message:detailMessage,person:movedTask.person,am:movedTask.am,project:movedTask.text},"am")
+      });
+    }
+  }
+
+  await logAction(
+    "telegram_move_result",
+    movedTask.id,
+    movedTask.source_id||"",
+    movedTask.text||"",
+    movedTask.person||"",
+    `Move Telegram result. Web: ${webStatus}, AM: ${amStatus}, failed: ${failed}\n\n${detailMessage}`,
+    movedTask.am||""
+  );
+
+  toast(`Đã đổi ngày task. Tele Web: ${webStatus}, AM: ${amStatus}`, failed?"#8a6d00":"#2e7d32");
 
   dragTask=null;
 }
+
 function changeMonth(n){current.setMonth(current.getMonth()+n);render()}
 
 function renderWorkload(){const date=workloadDate.value||todayStr(),tasks=Object.values(cache).flat(),byD={},byM={};webMembers().forEach(m=>{byD[m.name]={count:0,points:0,max:m.max_per_day||999};byM[m.name]={total:0,done:0,pending:0}});tasks.forEach(t=>{const pkg=t.package_name||pkgFromId(t.source_id);if(t.task_date===date&&byD[t.person]){byD[t.person].count++;byD[t.person].points+=pointFor(pkg,t.priority)}if(byM[t.person]){byM[t.person].total++;t.done?byM[t.person].done++:byM[t.person].pending++}});workloadDayBody.innerHTML=webMembers().map(m=>{const v=byD[m.name];const lab=v.count>=v.max?'<span class="badge urgent">Quá tải</span>':v.points>=1.8?'<span class="badge pending">Hơi tải</span>':'<span class="badge assigned">OK</span>';return`<tr><td><b>${esc(m.name)}</b></td><td>${v.count}/${v.max}</td><td>${v.points.toFixed(1)}</td><td>${lab}</td></tr>`}).join("");workloadMonthBody.innerHTML=webMembers().map(m=>{const v=byM[m.name];return`<tr><td><b>${esc(m.name)}</b></td><td>${v.total}</td><td>${v.done}</td><td>${v.pending}</td></tr>`}).join("")}
