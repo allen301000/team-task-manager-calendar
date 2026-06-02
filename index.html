@@ -905,6 +905,36 @@ td .badge.urgent{margin-top:4px}
           </table>
         </div>
       </div>
+
+      <div class="card" style="margin-top:12px">
+        <div class="queue-section-title">
+          <div>
+            <h3>🏖️ Lịch off Web trong tháng</h3>
+            <div class="muted">Auto assign / Assign batch sẽ bỏ qua đúng ngày off của từng Web, vẫn giữ thứ tự Sort ID bình thường.</div>
+          </div>
+          <div class="muted" id="offDaysSummary">Chưa load lịch off</div>
+        </div>
+
+        <div class="queue-toolbar">
+          <div class="queue-toolbar-left">
+            <input id="offMonth" class="queue-month-input" type="month" onchange="loadWebOffDaysUi()">
+            <select id="offMember" style="min-width:180px"></select>
+            <input id="offDate" type="date" style="width:auto">
+            <input id="offReason" placeholder="Lý do off / ghi chú..." style="max-width:260px">
+          </div>
+          <div class="queue-toolbar-right">
+            <button class="green" onclick="addWebOffDay()">+ Thêm ngày off</button>
+            <button class="ghost" onclick="loadWebOffDaysUi()">Reload</button>
+          </div>
+        </div>
+
+        <div class="wrap">
+          <table style="min-width:720px">
+            <thead><tr><th>Web</th><th>Ngày off trong tháng</th><th>Số ngày</th><th>Action</th></tr></thead>
+            <tbody id="offDaysBody"></tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
     <section id="page-domain_report" class="hidden">
@@ -1302,6 +1332,7 @@ if(!String(settings.settingsProfile||"").trim()&&String(BOOTSTRAP_CONFIG.setting
   settings.settingsProfile=BOOTSTRAP_CONFIG.settingsProfile.trim();
 }
 let supabaseClient=null,current=new Date(),cache={},queueRows=[],members=[],auditLogs=[];
+let webOffDaysCache={};
 let reportDataCache={month:"",loading:false,currentTasks:[],prevTasks:[]};
 let selectedQueue=null,selectedDay=null,editingTask=null,editingMember=null,dragTask=null,dragFromDay=null,dragFromIndex=null,contextQueueSourceId=null;
 let queueRenderToken=0;
@@ -1621,7 +1652,31 @@ function fillSelect(select,values,selected=""){select.innerHTML="";[...new Set(v
 function refreshDropdowns(defaultAm=""){fillSelect(assignPerson,peopleNames());fillSelect(taskPerson,peopleNames());fillSelect(filterPerson,["",...peopleNames()]);fillSelect(assignAM,amNames(),defaultAm);fillSelect(taskAM,amNames(),defaultAm);assignType.innerHTML="";taskType.innerHTML="";TYPES.forEach(t=>{assignType.innerHTML+=`<option>${t}</option>`;taskType.innerHTML+=`<option>${t}</option>`})}
 
 async function ensureDefaultMembers(){if(!requireDb())return;const {data,error}=await supabaseClient.from("members").select("id").limit(1);if(error){console.warn(error);members=FALLBACK_MEMBERS;return}if(data&&data.length)return;await supabaseClient.from("members").insert(FALLBACK_MEMBERS)}
-async function loadMembers(){if(!requireDb()){members=FALLBACK_MEMBERS;refreshDropdowns();return}await ensureDefaultMembers();const {data,error}=await supabaseClient.from("members").select("*").order("role").order("sort_order").order("name");if(error){console.warn("members fallback",error);members=FALLBACK_MEMBERS}else{members=data||[]}refreshDropdowns();renderMembers()}
+async function loadMembers(){
+  if(!requireDb()){
+    members=FALLBACK_MEMBERS;
+    refreshDropdowns();
+    fillOffMemberSelect();
+    renderOffDays();
+    return;
+  }
+  await ensureDefaultMembers();
+  const {data,error}=await supabaseClient.from("members").select("*").order("role").order("sort_order").order("name");
+  if(error){
+    console.warn("members fallback",error);
+    members=FALLBACK_MEMBERS;
+  }else{
+    members=data||[];
+  }
+  refreshDropdowns();
+  fillOffMemberSelect();
+  renderMembers();
+  if(document.getElementById("page-members") && !document.getElementById("page-members").classList.contains("hidden")){
+    if(document.getElementById("offMonth")&&!offMonth.value)offMonth.value=currentMonthLabel();
+    await loadWebOffDays(getOffMonthValue());
+    renderOffDays();
+  }
+}
 function renderMembers(){
   if(!document.getElementById("membersBody"))return;
 
@@ -1669,6 +1724,8 @@ function setupUi(){
   });
   if(document.getElementById("workloadDate"))workloadDate.value=todayStr();
   if(document.getElementById("resendNotifyDate")&&!resendNotifyDate.value)resendNotifyDate.value=todayStr();
+  if(document.getElementById("offMonth")&&!offMonth.value)offMonth.value=currentMonthLabel();
+  if(document.getElementById("offDate")&&!offDate.value)offDate.value=todayStr();
   if(document.getElementById("domainReportMonth")&&!domainReportMonth.value)domainReportMonth.value=`${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,"0")}`;
   if(document.getElementById("sheetChangeMonth")&&!sheetChangeMonth.value)sheetChangeMonth.value=`${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,"0")}`;
   setSupabaseUrl.value=settings.supabaseUrl||"";
@@ -1723,7 +1780,7 @@ function showPage(page){
   if(page==="calendar")render();
   if(page==="workload")renderWorkload();
   if(page==="report")renderReport();
-  if(page==="members")loadMembers();
+  if(page==="members"){loadMembers();loadWebOffDaysUi();}
   if(page==="logs")loadAuditLogs();
 }
 
@@ -4042,85 +4099,219 @@ function getTasksByPersonForDate(date){
   return by;
 }
 
-async function getNextAssignSlot(){
-  if(!requireDb()){
-    return {
-      date:todayStr(),
-      person:peopleNames()[0]||"Tony"
-    };
-  }
 
-  const team=webMembers();
+function currentMonthLabel(){
+  const d=current instanceof Date ? current : new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+}
 
-  if(!team.length){
-    return {
-      date:todayStr(),
-      person:"Tony"
-    };
-  }
+function getOffMonthValue(){
+  const el=document.getElementById("offMonth");
+  return (el&&el.value)||currentMonthLabel();
+}
 
-  const orderedNames=team.map(m=>m.name);
-  const today=todayStr();
+function getOffDaysStorageKey(month){
+  const profile=String(settings.settingsProfile||"default").trim()||"default";
+  return `web_off_days:${profile}:${month}`;
+}
 
-  const {data,error}=await supabaseClient
-    .from("tasks")
-    .select("task_date,person")
-    .in("person",orderedNames)
-    .order("task_date",{ascending:false})
-    .limit(1000);
+function normalizeOffDaysValue(value, month){
+  const data=value&&typeof value==="object"?value:{};
+  const days=data.days&&typeof data.days==="object"?data.days:{};
+  const clean={};
+  Object.keys(days).forEach(name=>{
+    const member=String(name||"").trim();
+    if(!member)return;
+    clean[member]=[...new Set((days[name]||[])
+      .map(d=>String(d||"").slice(0,10))
+      .filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d)&&String(d).slice(0,7)===month)
+    )].sort();
+  });
+  return {month,days:clean,updated_at:data.updated_at||null,updated_by:data.updated_by||"app"};
+}
 
-  if(error){
-    console.warn("getNextAssignSlot error",error);
+async function loadWebOffDays(month=getOffMonthValue(), force=false){
+  month=String(month||currentMonthLabel()).slice(0,7);
+  if(!force&&webOffDaysCache[month])return webOffDaysCache[month];
 
-    return {
-      date:today,
-      person:orderedNames[0]
-    };
-  }
+  const key=getOffDaysStorageKey(month);
+  let value=null;
 
-  if(!data||!data.length){
-    return {
-      date:today,
-      person:orderedNames[0]
-    };
-  }
-
-  let latestDate=data[0].task_date;
-
-  // Không tự assign về ngày quá khứ
-  if(latestDate<today){
-    latestDate=today;
-  }
-
-  const assigned=data
-    .filter(t=>t.task_date===latestDate)
-    .map(t=>t.person);
-
-  let maxIndex=-1;
-
-  assigned.forEach(person=>{
-    const idx=orderedNames.indexOf(person);
-
-    if(idx>maxIndex){
-      maxIndex=idx;
+  if(supabaseClient){
+    try{
+      const {data,error}=await supabaseClient
+        .from("app_settings")
+        .select("value")
+        .eq("key",key)
+        .maybeSingle();
+      if(error)throw error;
+      value=data?.value||null;
+    }catch(e){
+      console.warn("loadWebOffDays cloud failed, fallback localStorage",e);
+      logDebug("⚠️ Load lịch off cloud lỗi, dùng localStorage nếu có", e?.message||String(e));
     }
+  }
+
+  if(!value){
+    try{value=JSON.parse(localStorage.getItem(key)||"null");}catch(_){value=null;}
+  }
+
+  const normalized=normalizeOffDaysValue(value,month);
+  webOffDaysCache[month]=normalized;
+  return normalized;
+}
+
+async function saveWebOffDays(month, offData){
+  month=String(month||currentMonthLabel()).slice(0,7);
+  const key=getOffDaysStorageKey(month);
+  const value=normalizeOffDaysValue({...offData,updated_at:new Date().toISOString(),updated_by:"app"},month);
+  webOffDaysCache[month]=value;
+  localStorage.setItem(key,JSON.stringify(value));
+
+  if(supabaseClient){
+    const {error}=await supabaseClient
+      .from("app_settings")
+      .upsert({key,value,updated_at:new Date().toISOString()},{onConflict:"key"});
+    if(error){
+      logDebug("⚠️ Lưu lịch off cloud lỗi. Kiểm tra bảng app_settings/RLS.", error.message);
+      toast("Đã lưu local, nhưng lưu cloud lỗi: "+error.message,"#8a6d00");
+      return {ok:false,error};
+    }
+  }
+
+  return {ok:true};
+}
+
+function fillOffMemberSelect(){
+  const el=document.getElementById("offMember");
+  if(!el)return;
+  const cur=el.value;
+  const names=webMembers().map(m=>m.name);
+  el.innerHTML=names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join("");
+  if(cur&&names.includes(cur))el.value=cur;
+}
+
+function isMemberOffOnDate(memberName,dateStr){
+  const date=String(dateStr||"").slice(0,10);
+  const month=date.slice(0,7);
+  const member=String(memberName||"").trim();
+  const data=webOffDaysCache[month];
+  if(!data||!member)return false;
+  return (data.days?.[member]||[]).includes(date);
+}
+
+function getMemberOffDays(memberName,month){
+  const data=webOffDaysCache[String(month||"").slice(0,7)]||{days:{}};
+  return data.days?.[String(memberName||"").trim()]||[];
+}
+
+function isWeekendDate(dateStr){
+  const d=new Date(String(dateStr||"")+"T00:00:00");
+  const day=d.getDay();
+  return day===0||day===6;
+}
+
+function nextWorkdayAfter(dateStr){
+  const d=new Date(String(dateStr||todayStr())+"T00:00:00");
+  do{
+    d.setDate(d.getDate()+1);
+  }while(d.getDay()===0||d.getDay()===6);
+  return d.toISOString().slice(0,10);
+}
+
+async function loadOffDaysForDateSpan(startDate,countDays=45){
+  const months=new Set();
+  const d=new Date(String(startDate||todayStr())+"T00:00:00");
+  for(let i=0;i<countDays;i++){
+    months.add(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
+    d.setDate(d.getDate()+1);
+  }
+  for(const month of months){
+    await loadWebOffDays(month);
+  }
+}
+
+function renderOffDays(){
+  fillOffMemberSelect();
+
+  const month=getOffMonthValue();
+  const body=document.getElementById("offDaysBody");
+  const summary=document.getElementById("offDaysSummary");
+  if(!body)return;
+
+  const data=webOffDaysCache[month]||{month,days:{}};
+  const team=webMembers();
+  const rows=team.map(m=>{
+    const days=(data.days?.[m.name]||[]).filter(d=>String(d).slice(0,7)===month).sort();
+    return {member:m.name,days};
   });
 
-  // Nếu ngày mới nhất chưa đủ vòng team thì lấy người tiếp theo theo Sort ID
-  if(maxIndex<orderedNames.length-1){
-    return {
-      date:latestDate,
-      person:orderedNames[maxIndex+1]
-    };
+  const total=rows.reduce((s,r)=>s+r.days.length,0);
+  if(summary)summary.textContent=`Tháng ${month}: ${total} ngày off / ${rows.filter(r=>r.days.length).length} web`;
+
+  body.innerHTML=rows.map(r=>`<tr>
+    <td><b>${esc(r.member)}</b></td>
+    <td>${r.days.length?r.days.map(d=>`<span class="badge pending" style="margin:2px">${esc(d)} <button class="mini" style="background:transparent;color:#8a6d00;padding:0 2px!important" onclick="removeWebOffDay('${esc(r.member)}','${esc(d)}')">×</button></span>`).join(" "):'<span class="muted">Không off</span>'}</td>
+    <td>${r.days.length}</td>
+    <td>${r.days.length?`<button class="warn" onclick="clearWebOffDaysForMember('${esc(r.member)}')">Clear tháng</button>`:"-"}</td>
+  </tr>`).join("")||'<tr><td colspan="4" class="muted">Chưa có Web member active</td></tr>';
+}
+
+async function loadWebOffDaysUi(){
+  const month=getOffMonthValue();
+  if(document.getElementById("offDate") && !offDate.value){
+    offDate.value=`${month}-01`;
   }
+  await loadWebOffDays(month,true);
+  renderOffDays();
+}
 
-  // Nếu ngày đó đã đủ team thì qua ngày tiếp theo, quay lại người đầu tiên
-  const nextDate=new Date(latestDate+"T00:00:00");
-  nextDate.setDate(nextDate.getDate()+1);
+async function addWebOffDay(){
+  const month=getOffMonthValue();
+  const member=String(document.getElementById("offMember")?.value||"").trim();
+  const date=String(document.getElementById("offDate")?.value||"").slice(0,10);
 
-  return {
-    date:nextDate.toISOString().slice(0,10),
-    person:orderedNames[0]
+  if(!member){toast("Chưa chọn Web", "#8a6d00");return;}
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){toast("Chưa chọn ngày off", "#8a6d00");return;}
+  if(date.slice(0,7)!==month){toast("Ngày off phải nằm trong tháng đang chọn", "#8a6d00");return;}
+
+  const data=await loadWebOffDays(month);
+  data.days[member]=[...new Set([...(data.days[member]||[]),date])].sort();
+
+  await saveWebOffDays(month,data);
+  await logAction("web_off_day_add",null,"",`Off ${member}`,"",`Add off day ${date} for ${member}`,"");
+  renderOffDays();
+  toast(`Đã thêm off ${member}: ${date}`, "#2e7d32");
+}
+
+async function removeWebOffDay(member,date){
+  const month=String(date||"").slice(0,7)||getOffMonthValue();
+  const data=await loadWebOffDays(month);
+  const name=String(member||"").trim();
+  data.days[name]=(data.days[name]||[]).filter(d=>d!==date);
+  await saveWebOffDays(month,data);
+  await logAction("web_off_day_remove",null,"",`Off ${name}`,"",`Remove off day ${date} for ${name}`,"");
+  renderOffDays();
+}
+
+async function clearWebOffDaysForMember(member){
+  const month=getOffMonthValue();
+  const name=String(member||"").trim();
+  if(!name)return;
+  if(!confirm(`Xóa toàn bộ ngày off của ${name} trong tháng ${month}?`))return;
+  const data=await loadWebOffDays(month);
+  data.days[name]=[];
+  await saveWebOffDays(month,data);
+  await logAction("web_off_day_clear",null,"",`Off ${name}`,"",`Clear off days ${month} for ${name}`,"");
+  renderOffDays();
+  toast(`Đã clear ngày off của ${name}`, "#2e7d32");
+}
+
+async function getNextAssignSlot(){
+  const plan=await getBulkAssignPlan(1);
+  return plan[0]||{
+    date:nextWorkdayFrom(todayStr()),
+    person:peopleNames()[0]||"Tony"
   };
 }
 
@@ -4360,13 +4551,15 @@ async function getBulkAssignPlan(count){
 
   if(!team.length){
     return Array.from({length:count},()=>({
-      date:todayStr(),
+      date:nextWorkdayFrom(todayStr()),
       person:"Tony"
     }));
   }
 
   const orderedNames=team.map(m=>m.name);
-  const today=todayStr();
+  const today=nextWorkdayFrom(todayStr());
+
+  await loadOffDaysForDateSpan(today,90);
 
   const {data,error}=await supabaseClient
     .from("tasks")
@@ -4387,7 +4580,7 @@ async function getBulkAssignPlan(count){
 
     const d=String(t.task_date).slice(0,10);
 
-    if(d<today)return;
+    if(d<today||isWeekendDate(d))return;
 
     if(!assignedByDate[d])assignedByDate[d]=new Set();
 
@@ -4397,11 +4590,21 @@ async function getBulkAssignPlan(count){
   const dates=Object.keys(assignedByDate).sort();
   let cursorDate=dates.length?dates[dates.length-1]:today;
 
-  if(cursorDate<today)cursorDate=today;
+  if(cursorDate<today||isWeekendDate(cursorDate))cursorDate=today;
 
   const result=[];
+  let guard=0;
 
-  while(result.length<count){
+  while(result.length<count && guard<730){
+    guard++;
+
+    if(isWeekendDate(cursorDate)){
+      cursorDate=nextWorkdayAfter(cursorDate);
+      continue;
+    }
+
+    await loadWebOffDays(cursorDate.slice(0,7));
+
     if(!assignedByDate[cursorDate])assignedByDate[cursorDate]=new Set();
 
     const assignedSet=assignedByDate[cursorDate];
@@ -4412,16 +4615,14 @@ async function getBulkAssignPlan(count){
       if(idx>maxAssignedIndex)maxAssignedIndex=idx;
     });
 
-    // Rule: chạy đúng thứ tự sort_order của team.
-    // Nếu ngày đang chạy đã có Tony thì bắt đầu Alex; có tới Leo thì qua ngày mới về Tony.
     let startIndex=maxAssignedIndex+1;
 
     if(startIndex>=orderedNames.length){
-      const nextDate=new Date(cursorDate+"T00:00:00");
-      nextDate.setDate(nextDate.getDate()+1);
-      cursorDate=nextDate.toISOString().slice(0,10);
+      cursorDate=nextWorkdayAfter(cursorDate);
       continue;
     }
+
+    let addedThisPass=false;
 
     for(let i=startIndex;i<orderedNames.length;i++){
       if(result.length>=count)break;
@@ -4430,19 +4631,29 @@ async function getBulkAssignPlan(count){
 
       if(assignedSet.has(person))continue;
 
+      if(isMemberOffOnDate(person,cursorDate)){
+        logDebug("Skip assign vì Web off", {person,date:cursorDate});
+        continue;
+      }
+
       result.push({
         date:cursorDate,
         person
       });
 
       assignedSet.add(person);
+      addedThisPass=true;
     }
 
     if(result.length>=count)break;
 
-    const nextDate=new Date(cursorDate+"T00:00:00");
-    nextDate.setDate(nextDate.getDate()+1);
-    cursorDate=nextDate.toISOString().slice(0,10);
+    if(!addedThisPass || startIndex>=orderedNames.length-1){
+      cursorDate=nextWorkdayAfter(cursorDate);
+    }
+  }
+
+  if(result.length<count){
+    throw new Error("Không lập được đủ lịch assign vì team off quá nhiều hoặc không còn ngày hợp lệ.");
   }
 
   console.table(result.map((x,idx)=>({
@@ -4707,13 +4918,17 @@ function addWorkdaysFrom(startDateStr, workdayOffset){
   return d.toISOString().slice(0,10);
 }
 
-function estimateAssignSchedule(rows){
-  const people=webMembers();
-  const start=nextWorkdayFrom(todayStr());
+async function estimateAssignSchedule(rows){
+  const plan=await getBulkAssignPlan((rows||[]).length);
   return (rows||[]).map((r,idx)=>{
-    const person=people.length?people[idx%people.length]:null;
-    const dayOffset=people.length?Math.floor(idx/people.length):0;
-    return {source_id:r.source_id,planned_web:person?.name||"-",planned_date:addWorkdaysFrom(start,dayOffset),member:person};
+    const p=plan[idx]||{};
+    const member=findMemberLooseByName(p.person,["WEB","BOTH"])||memberByName(p.person);
+    return {
+      source_id:r.source_id,
+      planned_web:p.person||"-",
+      planned_date:p.date||nextWorkdayFrom(todayStr()),
+      member
+    };
   });
 }
 
@@ -4755,20 +4970,16 @@ async function runAutoAssignAfterSync(){
   }
   const plan=await buildAssignValidationPlan(candidates,[]);
   await sendAssignAdminNotice("[AUTO ASSIGN] Validate trước khi assign", plan);
-  const sourceIds=candidates.map(r=>r.source_id).filter(Boolean);
   try{
-    toast(`Auto assign đang chạy ${sourceIds.length} project...`, "#f05a28");
-    const {data,error}=await supabaseClient.rpc("assign_batch_queue_v3",{p_source_ids:sourceIds});
-    if(error)throw error;
-    const rows=data||[];
-    const assignedRows=rows.filter(r=>!r.skipped_reason);
-    const skippedRows=rows.filter(r=>r.skipped_reason);
+    toast(`Auto assign đang chạy ${candidates.length} project, có tính ngày off...`, "#f05a28");
+    const assignedRows=await assignRowsInAppWithOffDays(candidates);
+    const skippedRows=[];
     let notifyResult={sent:0,missing:0,failed:0};
     if(assignedRows.length){
       notifyResult=await sendBulkAssignNotifications(assignedRows,candidates);
     }
     await sendAssignAdminNotice("[AUTO ASSIGN] Đã chạy xong", {assigned_count:assignedRows.length,skipped_count:skippedRows.length,telegram_sent:notifyResult.sent||0,rows:assignedRows.map(r=>({project:r.project,person:r.person,task_date:r.task_date}))});
-    await sendTrackingLog("auto_assign_done",{result:"success",assigned_count:assignedRows.length,skipped_count:skippedRows.length,telegram_result:notifyResult});
+    await sendTrackingLog("auto_assign_done",{result:"success",assigned_count:assignedRows.length,skipped_count:skippedRows.length,telegram_result:notifyResult,detail:"Auto assign off-days aware"});
     await loadQueue();
     toast(`Auto assign xong: ${assignedRows.length} task`, "#2e7d32");
   }catch(e){
@@ -4784,7 +4995,7 @@ async function buildAssignValidationPlan(selectedRows, skippedByUi=[]){
   const today=nextWorkdayFrom(todayStr());
   const sourceIds=[...new Set((selectedRows||[]).map(r=>String(r.source_id||"").trim()).filter(Boolean))];
   const people=webMembers();
-  const schedule=estimateAssignSchedule(selectedRows||[]);
+  const schedule=await estimateAssignSchedule(selectedRows||[]);
   const scheduleById=new Map(schedule.map(x=>[String(x.source_id||""),x]));
   const warnings=[];
   const existingMap=new Map();
@@ -4820,6 +5031,7 @@ async function buildAssignValidationPlan(selectedRows, skippedByUi=[]){
 
     if(existing)rowWarnings.push(`Đã có Calendar từ hôm nay: ${existing.person||"-"} / ${String(existing.task_date||"").slice(0,10)}`);
     if(plannedWeb && !String(plannedWeb.telegram_chat_id||"").trim())rowWarnings.push(`Web ${plannedWeb.name} thiếu Telegram ID`);
+    if(plannedWeb && isMemberOffOnDate(plannedWeb.name,sch.planned_date))rowWarnings.push(`Web ${plannedWeb.name} đang off ngày ${sch.planned_date}`);
     if(!plannedWeb)rowWarnings.push("Không có Web active để nhận task");
     if(amInfo.name && amInfo.name!=="None" && (!amMember || !String(amMember.telegram_chat_id||"").trim()))rowWarnings.push(`AM ${amInfo.name} thiếu Telegram ID hoặc chưa có trong Members`);
     if(!r.domain_notified)rowWarnings.push("Chưa báo domain");
@@ -4900,6 +5112,127 @@ async function confirmValidatedAssignBatch(){
   await runBulkAssignSelectedNow(true);
 }
 
+
+async function selectExistingTasksBySourceIds(sourceIds){
+  const map=new Map();
+  const clean=[...new Set((sourceIds||[]).map(x=>String(x||"").trim()).filter(Boolean))];
+  for(const chunk of chunkList(clean,100)){
+    const {data,error}=await supabaseClient
+      .from("tasks")
+      .select("id,source_id")
+      .in("source_id",chunk);
+    if(error)throw error;
+    (data||[]).forEach(t=>map.set(String(t.source_id||"").trim(),t));
+    await yieldUi();
+  }
+  return map;
+}
+
+async function assignRowsInAppWithOffDays(selectedRows){
+  const rows=sortQueuePriorityThenSheet(selectedRows||[]);
+  const plan=await getBulkAssignPlan(rows.length);
+  const existingMap=await selectExistingTasksBySourceIds(rows.map(r=>r.source_id));
+  const nowIso=new Date().toISOString();
+  const assignedRows=[];
+  const queuePayloads=[];
+
+  for(let idx=0;idx<rows.length;idx++){
+    const row=rows[idx];
+    const p=plan[idx];
+    const text=String(row.project||"").trim();
+    const sourceId=String(row.source_id||"").trim();
+    const type=inferType(row);
+    const amInfo=resolveAssignAm(row.am||"None",row);
+    const am=amInfo.name||"None";
+    const packageName=pkgFromProject(text||sourceId);
+
+    const taskPayload={
+      source_id:sourceId,
+      task_date:p.date,
+      text,
+      person:p.person,
+      type,
+      am,
+      done:false,
+      sort_order:999,
+      priority:"Normal",
+      package_name:packageName,
+      note:row.note||null
+    };
+
+    let taskId=null;
+    const existing=existingMap.get(sourceId);
+
+    if(existing?.id){
+      taskId=existing.id;
+      const {error}=await supabaseClient
+        .from("tasks")
+        .update(taskPayload)
+        .eq("id",taskId);
+      if(error)throw error;
+    }else{
+      const {data,error}=await supabaseClient
+        .from("tasks")
+        .insert(taskPayload)
+        .select("id")
+        .single();
+      if(error)throw error;
+      taskId=data?.id||null;
+    }
+
+    queuePayloads.push({
+      source_id:sourceId,
+      project:text,
+      am:am||row.am||null,
+      start_date:row.start_date||null,
+      expired_date:row.expired_date||null,
+      template_url:row.template_url||null,
+      layout_url:row.layout_url||null,
+      domain_url:row.domain_url||null,
+      package_name:packageName,
+      source_status:row.source_status||"Doing",
+      source_row:row.source_row||null,
+      queue_status:"ASSIGNED",
+      is_current:false,
+      force_current:false,
+      assigned_person:p.person,
+      assigned_date:p.date,
+      assigned_month:String(p.date).slice(0,7),
+      assigned_month_note:`Assigned trong Calendar tháng ${String(p.date).slice(0,7)}; off-days aware`,
+      priority:"Normal",
+      note:row.note||null,
+      updated_at:nowIso,
+      last_seen_at:nowIso
+    });
+
+    assignedRows.push({
+      source_id:sourceId,
+      task_id:taskId,
+      project:text,
+      person:p.person,
+      task_date:p.date,
+      task_type:type,
+      type,
+      am
+    });
+
+    if((idx+1)%10===0){
+      toast(`Đang assign ${idx+1}/${rows.length} task, đã bỏ qua ngày off`, "#f05a28");
+      await yieldUi();
+    }
+  }
+
+  for(const chunk of chunkList(queuePayloads,100)){
+    const {error}=await supabaseClient
+      .from("task_queue")
+      .upsert(chunk,{onConflict:"source_id",ignoreDuplicates:false});
+    if(error)throw error;
+    await yieldUi();
+  }
+
+  return assignedRows;
+}
+
 async function runBulkAssignSelectedNow(skipConfirm=false){
   if(!requireDb())return;
 
@@ -4914,8 +5247,6 @@ async function runBulkAssignSelectedNow(skipConfirm=false){
 
   let selectedRows=queueRows.filter(r=>selectedIds.includes(String(r.source_id||"").trim()));
 
-  // Chỉ lọc nhẹ ở UI. Database RPC sẽ kiểm tra an toàn lần cuối.
-  // Không dùng assigned_month để chặn assign vì field này có thể còn sót sau khi test/xóa Calendar.
   const skippedByUi=[];
   selectedRows=selectedRows.filter(r=>{
     const status=String(r.queue_status||"NEW").trim();
@@ -4943,10 +5274,10 @@ async function runBulkAssignSelectedNow(skipConfirm=false){
 
   if(!skipConfirm){
     const ok=confirm(
-      `Assign batch ${selectedRows.length} project bằng Database RPC?\n\n`+
-      `Bước 1: Supabase assign nhanh, không treo trang.\n`+
-      `Bước 2: Web tự gửi Telegram sau khi assign thành công, chia nhỏ để không freeze.\n`+
-      `Auto assign chỉ tính member Active = true, role WEB/BOTH, theo Sort ID.\n`+
+      `Assign batch ${selectedRows.length} project?\n\n`+
+      `Rule: theo Sort ID team Web, chỉ T2-T6.\n`+
+      `Nếu Web off đúng ngày đó thì hệ thống bỏ qua người đó và assign người tiếp theo trong thứ tự.\n`+
+      `Hết vòng sẽ tự chuyển sang ngày làm việc kế tiếp.\n`+
       (skippedByUi.length?`\nĐã bỏ qua ${skippedByUi.length} project đã assign ở UI.`:"")
     );
 
@@ -4964,49 +5295,18 @@ async function runBulkAssignSelectedNow(skipConfirm=false){
     }
 
     clearDebug();
-    await sendTrackingLog("assign_batch_start",{result:"info",detail:`Start assign batch ${selectedRows.length} project`,payload:{source_ids:selectedRows.map(r=>r.source_id)}});
-    toast("Đang assign trong Supabase RPC...", "#f05a28");
-    logDebug("Assign batch RPC source_ids", selectedRows.map(r=>r.source_id));
+    await sendTrackingLog("assign_batch_start",{result:"info",detail:`Start off-days aware assign batch ${selectedRows.length} project`,payload:{source_ids:selectedRows.map(r=>r.source_id)}});
+    toast("Đang lập lịch assign có tính ngày off...", "#f05a28");
 
-    const {data,error}=await supabaseClient.rpc("assign_batch_queue_v3",{
-      p_source_ids:selectedRows.map(r=>r.source_id)
-    });
+    const assignedRows=await assignRowsInAppWithOffDays(selectedRows);
+    const skippedRows=[];
 
-    if(error){
-      throw new Error(error.message||JSON.stringify(error));
-    }
-
-    const rows=data||[];
-    const assignedRows=rows.filter(r=>!r.skipped_reason);
-    const restoredRows=rows.filter(r=>r.skipped_reason==="already_exists_in_calendar_restored");
-    const skippedRows=rows.filter(r=>r.skipped_reason&&r.skipped_reason!=="already_exists_in_calendar_restored");
-
-    console.table(rows);
-    logDebug("Assign batch RPC result",{
-      total_returned:rows.length,
-      assigned:assignedRows.length,
-      restored:restoredRows.length,
-      skipped:skippedRows.length,
-      skipped_rows:rows.filter(r=>r.skipped_reason)
-    });
-
-    // Gửi Telegram SAU khi RPC assign xong. Chỉ gửi cho task mới được assign,
-    // không gửi cho dòng restored để tránh spam lại task cũ đã có trong Calendar.
-    let notifyResult={sent:0,missing:0,failed:0,skipped:0};
+    let notifyResult={sent:0,missing:0,failed:0};
     if(assignedRows.length){
       if(assignBtn)assignBtn.textContent="Đang gửi Telegram...";
       toast(`Đã assign ${assignedRows.length} task. Đang gửi Telegram...`, "#f05a28");
       notifyResult=await sendBulkAssignNotifications(assignedRows, selectedRows);
       logDebug("Assign batch Telegram result", notifyResult);
-    }
-
-    if(restoredRows.length){
-      logDebug("Không gửi Telegram cho task restored để tránh gửi trùng", restoredRows.map(r=>({
-        source_id:r.source_id,
-        project:r.project,
-        person:r.person,
-        task_date:r.task_date
-      })));
     }
 
     document.querySelectorAll(".queue-domain-check").forEach(cb=>cb.checked=false);
@@ -5019,24 +5319,19 @@ async function runBulkAssignSelectedNow(skipConfirm=false){
 
     const sec=Math.round((Date.now()-startedAt)/1000);
     toast(
-      `Assign xong: ${assignedRows.length} mới, ${restoredRows.length} restore, ${skippedRows.length} bỏ qua. Telegram: ${notifyResult.sent} gửi, ${notifyResult.missing} thiếu ID (${sec}s)`,
+      `Assign xong: ${assignedRows.length} task, ${skippedRows.length} bỏ qua. Telegram: ${notifyResult.sent} gửi, ${notifyResult.missing} thiếu ID (${sec}s)`,
       "#2e7d32"
     );
-    await sendTrackingLog("assign_batch_done",{result:"success",detail:`Assigned ${assignedRows.length}, restored ${restoredRows.length}, skipped ${skippedRows.length}, telegram sent ${notifyResult.sent}`,assigned_count:assignedRows.length,restored_count:restoredRows.length,skipped_count:skippedRows.length,telegram_result:notifyResult});
+    await sendTrackingLog("assign_batch_done",{result:"success",detail:`Assigned ${assignedRows.length}, skipped ${skippedRows.length}, telegram sent ${notifyResult.sent}; off-days aware`,assigned_count:assignedRows.length,skipped_count:skippedRows.length,telegram_result:notifyResult});
 
-    // Reload một lần duy nhất sau khi assign + gửi thông báo xong.
     await loadQueue();
     showPage("calendar");
 
-    if(rows.some(r=>r.skipped_reason)){
-      logDebug("Một số project bị bỏ qua / restore", rows.filter(r=>r.skipped_reason));
-    }
-
   }catch(e){
-    console.error("Bulk assign RPC failed", e);
-    logDebug("ASSIGN RPC / TELEGRAM ERROR", e.message||e);
+    console.error("Bulk assign failed", e);
+    logDebug("ASSIGN / TELEGRAM ERROR", e.message||e);
     toast("Lỗi assign batch: "+(e.message||e), "#b71c1c");
-    await sendTrackingLog("assign_batch_error",{result:"failed",error:e?.message||String(e),detail:"Bulk assign RPC/Telegram failed"});
+    await sendTrackingLog("assign_batch_error",{result:"failed",error:e?.message||String(e),detail:"Bulk assign off-days aware failed"});
   }finally{
     if(assignBtn){
       assignBtn.disabled=false;
@@ -5802,6 +6097,8 @@ function setupUi(){
   });
   if(document.getElementById("workloadDate"))workloadDate.value=todayStr();
   if(document.getElementById("resendNotifyDate"))resendNotifyDate.value=todayStr();
+  if(document.getElementById("offMonth")&&!offMonth.value)offMonth.value=currentMonthLabel();
+  if(document.getElementById("offDate")&&!offDate.value)offDate.value=todayStr();
   applySettingsSnapshot(settings,false);
   if(document.getElementById("queueCurrentFilterChip"))queueCurrentFilterChip.textContent=queueFilterLabel(queueStatusFilter?.value||"CURRENT");
   setupSecretInputs();
