@@ -4547,30 +4547,52 @@ async function sendBulkAssignNotifications(rows, insertedMap){
 }
 
 async function getBulkAssignPlan(count){
+  const totalNeeded=Math.max(0,Number(count||0));
+
+  if(totalNeeded===0){
+    return [];
+  }
+
   const team=webMembers();
 
   if(!team.length){
-    return Array.from({length:count},()=>({
+    return Array.from({length:totalNeeded},()=>({
       date:nextWorkdayFrom(todayStr()),
       person:"Tony"
     }));
   }
 
-  const orderedNames=team.map(m=>m.name);
+  const orderedNames=team.map(m=>String(m.name||"").trim()).filter(Boolean);
   const today=nextWorkdayFrom(todayStr());
 
-  await loadOffDaysForDateSpan(today,90);
+  if(!orderedNames.length){
+    throw new Error("Không có Web member Active role WEB/BOTH để assign.");
+  }
 
-  const {data,error}=await supabaseClient
-    .from("tasks")
-    .select("task_date,person")
-    .in("person",orderedNames)
-    .gte("task_date",today)
-    .order("task_date",{ascending:false})
-    .limit(5000);
+  // Load trước vài tháng gần nhất, các tháng xa hơn sẽ được load tiếp trong vòng lặp.
+  await loadOffDaysForDateSpan(today,120);
+
+  let data=[];
+  let error=null;
+
+  try{
+    const res=await supabaseClient
+      .from("tasks")
+      .select("task_date,person")
+      .in("person",orderedNames)
+      .gte("task_date",today)
+      .order("task_date",{ascending:true})
+      .limit(10000);
+
+    data=res.data||[];
+    error=res.error||null;
+  }catch(e){
+    error=e;
+  }
 
   if(error){
     console.warn("getBulkAssignPlan error",error);
+    logDebug("⚠️ Không load được Calendar hiện tại khi lập lịch assign", error?.message||String(error));
   }
 
   const assignedByDate={};
@@ -4590,45 +4612,34 @@ async function getBulkAssignPlan(count){
   const dates=Object.keys(assignedByDate).sort();
   let cursorDate=dates.length?dates[dates.length-1]:today;
 
-  if(cursorDate<today||isWeekendDate(cursorDate))cursorDate=today;
+  if(cursorDate<today||isWeekendDate(cursorDate)){
+    cursorDate=today;
+  }
 
   const result=[];
-  let guard=0;
+  const maxSearchDays=Math.max(1095,Math.ceil(totalNeeded/Math.max(1,orderedNames.length))*21+180);
+  let searchedDays=0;
 
-  while(result.length<count && guard<730){
-    guard++;
-
+  while(result.length<totalNeeded && searchedDays<maxSearchDays){
     if(isWeekendDate(cursorDate)){
       cursorDate=nextWorkdayAfter(cursorDate);
       continue;
     }
+
+    searchedDays++;
 
     await loadWebOffDays(cursorDate.slice(0,7));
 
     if(!assignedByDate[cursorDate])assignedByDate[cursorDate]=new Set();
 
     const assignedSet=assignedByDate[cursorDate];
-    let maxAssignedIndex=-1;
+    let addedThisDay=0;
 
-    assignedSet.forEach(person=>{
-      const idx=orderedNames.indexOf(person);
-      if(idx>maxAssignedIndex)maxAssignedIndex=idx;
-    });
-
-    let startIndex=maxAssignedIndex+1;
-
-    if(startIndex>=orderedNames.length){
-      cursorDate=nextWorkdayAfter(cursorDate);
-      continue;
-    }
-
-    let addedThisPass=false;
-
-    for(let i=startIndex;i<orderedNames.length;i++){
-      if(result.length>=count)break;
-
-      const person=orderedNames[i];
-
+    // Fill theo Sort ID mỗi ngày. Nếu người đó đã có task hoặc off thì bỏ qua,
+    // người kế tiếp vẫn được nhận task. Nhờ vậy không bị kẹt khi 1 người off
+    // hoặc Calendar có dữ liệu thủ công bị lệch thứ tự.
+    for(const person of orderedNames){
+      if(result.length>=totalNeeded)break;
       if(assignedSet.has(person))continue;
 
       if(isMemberOffOnDate(person,cursorDate)){
@@ -4642,18 +4653,35 @@ async function getBulkAssignPlan(count){
       });
 
       assignedSet.add(person);
-      addedThisPass=true;
+      addedThisDay++;
     }
 
-    if(result.length>=count)break;
+    if(result.length>=totalNeeded)break;
 
-    if(!addedThisPass || startIndex>=orderedNames.length-1){
-      cursorDate=nextWorkdayAfter(cursorDate);
+    // Dù ngày đó có assign được hay không, sau khi quét hết team thì qua ngày làm việc kế tiếp.
+    cursorDate=nextWorkdayAfter(cursorDate);
+
+    if(!addedThisDay){
+      logDebug("Không có Web available trong ngày, chuyển sang ngày làm việc kế tiếp", {date:cursorDate});
     }
   }
 
-  if(result.length<count){
-    throw new Error("Không lập được đủ lịch assign vì team off quá nhiều hoặc không còn ngày hợp lệ.");
+  if(result.length<totalNeeded){
+    const offSummary=orderedNames.map(name=>({
+      name,
+      off_days:Object.values(webOffDaysCache||{}).reduce((sum,m)=>sum+((m?.days?.[name]||[]).length),0)
+    }));
+
+    logDebug("Không lập đủ lịch assign",{
+      need:totalNeeded,
+      planned:result.length,
+      searched_days:searchedDays,
+      max_search_days:maxSearchDays,
+      team:orderedNames,
+      off_summary:offSummary
+    });
+
+    throw new Error(`Không lập được đủ lịch assign. Cần ${totalNeeded}, mới lập được ${result.length}. Kiểm tra lại lịch off hoặc Active member.`);
   }
 
   console.table(result.map((x,idx)=>({
