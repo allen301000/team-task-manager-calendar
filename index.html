@@ -1850,8 +1850,10 @@ function buildTelegramContentPreview(payload, recipient){
   if(event==="domain_manual") return clean;
   if(recipient==="web"){
     let title="[TASK]";
+    const ctx=String(payload.context||"").toLowerCase().trim();
     if(event==="new"||event==="resend_assign")title="[TASK NEW]";
-    if(event==="update")title="[TASK UPDATED]";
+    if(event==="done"||ctx.includes("done"))title="[TASK DONE]";
+    else if(event==="update")title="[TASK UPDATED]";
     if(event==="move")title="[TASK MOVED]";
     if(event==="delete")title="[TASK DELETED]";
     return `${title}\n${clean}`.trim();
@@ -5812,7 +5814,8 @@ async function toggleDone(t){
     const queueRow=await getQueueRowForDoneTask(t);
     const doneNotice=await buildDoneAmNoticeText(t,queueRow);
     await logAction("done",t.id,t.source_id||"",t.text,t.person,doneNotice,t.am);
-    await notifyOneDoneTask(t,queueRow,"calendar_done");
+    const doneResult=await notifyOneDoneTask(t,queueRow,"calendar_done","both");
+    toast(`Đã done task. Web ${doneResult.web_sent||0}, AM ${doneResult.am_sent||0}, thiếu ID ${(doneResult.missing_web||0)+(doneResult.missing_am||0)}, lỗi ${doneResult.failed||0}`, doneResult.failed?"#8a6d00":"#2e7d32");
   }else{
     await logAction("undone",t.id,t.source_id||"",t.text,t.person,"Toggle undone",t.am);
   }
@@ -6610,24 +6613,46 @@ async function buildDoneAmNoticeText(task, queueRow={}){
   return `[AM] TASK HOÀN THÀNH\n👉 Từ: ${person}\n${project}${demoLink?`\nDemo Link: ${demoLink}`:""}`;
 }
 
-async function notifyOneDoneTask(task, queueRow={}, context="manual_resend_done"){
+async function buildDoneWebNoticeText(task, queueRow={}){
+  const project=String(task.text||queueRow.project||task.source_id||queueRow.source_id||"").trim();
+  const person=String(task.person||"").trim();
+  const am=String(task.am||queueRow.am||"").trim();
+  const taskDate=String(task.task_date||"").slice(0,10);
+  const type=String(task.type||pickAssignTypeFromProject(project)).trim();
+
+  return `✅ TASK HOÀN THÀNH\n`+
+    `Project: ${project}\n`+
+    `Type: ${type}\n\n`+
+    `Member: ${person}\n`+
+    `AM: ${am||"None"}\n`+
+    `📅 ${taskDate}`;
+}
+
+async function notifyOneDoneTask(task, queueRow={}, context="manual_resend_done", target="both"){
   await ensureMembersReadyForNotify();
 
   const sourceId=String(task.source_id||queueRow.source_id||"").trim();
   const project=String(task.text||queueRow.project||sourceId).trim();
   const person=String(task.person||"").trim();
+  const taskDate=String(task.task_date||"").slice(0,10);
+  const type=String(task.type||pickAssignTypeFromProject(project)).trim();
+  const finalTarget=String(target||"both").toLowerCase();
+
+  const webMember=findMemberLooseByName(person,["WEB","BOTH"])||memberByName(person);
+  const webChatId=String(webMember?.telegram_chat_id||"").trim();
+
   const amInfo=resolveAssignAm(task.am||queueRow.am||"None",{...queueRow,source_id:sourceId,project});
   const am=amInfo.name||"None";
   const amMember=amInfo.member||findMemberLooseByName(am,["AM","BOTH"]);
   const amChatId=String(amMember?.telegram_chat_id||"").trim();
-  const taskDate=String(task.task_date||"").slice(0,10);
-  const type=String(task.type||pickAssignTypeFromProject(project)).trim();
 
-  // DONE: lấy domain/demo_link từ tab Info qua GAS.
+  // DONE: lấy domain/demo_link từ tab Info qua GAS cho thông báo AM.
   const infoDomain=await getDoneDomainFromInfo(project);
   const rawDomain=infoDomain.domain||"";
   const demoLink=infoDomain.demo_link||"";
-  const doneNotice=await buildDoneAmNoticeText({...task,person},queueRow);
+
+  const doneNotice=await buildDoneAmNoticeText({...task,person,am},queueRow);
+  const webDoneNotice=await buildDoneWebNoticeText({...task,person,am},queueRow);
 
   const result={
     web_sent:0,
@@ -6635,98 +6660,173 @@ async function notifyOneDoneTask(task, queueRow={}, context="manual_resend_done"
     missing_web:0,
     missing_am:0,
     failed:0,
-    done_notice:doneNotice
+    done_notice:doneNotice,
+    web_done_notice:webDoneNotice
   };
 
-  if(!am || am==="None"){
-    result.missing_am++;
-    await recordTelegramNotifyLog({
-      context,
-      recipient:"am",
-      status:"missing",
-      source_id:sourceId,
-      task_id:task.id||null,
-      task_date:taskDate,
-      project,
-      person,
-      am,
-      error:"Missing AM",
-      detail:doneNotice
-    });
-    return result;
+  // Gửi cho Web khi Done.
+  // Lưu ý: dùng event "update" cho Web để tương thích với GAS cũ vốn chỉ gửi member ở event new/move/update/delete.
+  // Nội dung vẫn là TASK HOÀN THÀNH, log trong app hiển thị context done.
+  if(finalTarget==="both"||finalTarget==="web"){
+    if(webChatId){
+      const webPayload={
+        event:"update",
+        context:context+"_web_done",
+        recipient:"web",
+        source_id:sourceId,
+        task_id:task.id||null,
+        project,
+        task_date:taskDate,
+        result:"success",
+        person,
+        am,
+        type,
+        person_chat_id:webChatId,
+        am_chat_id:"",
+        message:webDoneNotice
+      };
+
+      try{
+        await sendTelegram(webPayload);
+        result.web_sent++;
+        await recordTelegramNotifyLog({
+          context:context+"_web_done",
+          recipient:"web",
+          status:"success",
+          source_id:sourceId,
+          task_id:task.id||null,
+          task_date:taskDate,
+          project,
+          person,
+          am,
+          chat_id:webChatId,
+          detail:webDoneNotice
+        });
+      }catch(e){
+        result.failed++;
+        await recordTelegramNotifyLog({
+          context:context+"_web_done",
+          recipient:"web",
+          status:"failed",
+          source_id:sourceId,
+          task_id:task.id||null,
+          task_date:taskDate,
+          project,
+          person,
+          am,
+          chat_id:webChatId,
+          error:e?.message||String(e),
+          detail:webDoneNotice
+        });
+        logDebug("⚠️ Gửi Telegram done cho Web lỗi",{source_id:sourceId,project,person,chat_id:webChatId,error:e?.message||String(e)});
+      }
+    }else{
+      result.missing_web++;
+      await recordTelegramNotifyLog({
+        context:context+"_web_done",
+        recipient:"web",
+        status:"missing",
+        source_id:sourceId,
+        task_id:task.id||null,
+        task_date:taskDate,
+        project,
+        person,
+        am,
+        error:"Missing Web telegram_chat_id",
+        detail:webDoneNotice
+      });
+      logDebug("⚠️ Không gửi được Telegram done cho Web vì thiếu telegram_chat_id",{source_id:sourceId,project,person});
+    }
   }
 
-  if(!amChatId){
-    result.missing_am++;
-    await recordTelegramNotifyLog({
-      context,
-      recipient:"am",
-      status:"missing",
-      source_id:sourceId,
-      task_id:task.id||null,
-      task_date:taskDate,
-      project,
-      person,
-      am,
-      error:"Missing AM telegram_chat_id",
-      detail:doneNotice
-    });
-    logDebug("⚠️ Không gửi được Telegram done cho AM vì thiếu telegram_chat_id",{source_id:sourceId,project,am});
-    return result;
-  }
+  // Gửi cho AM khi Done.
+  if(finalTarget==="both"||finalTarget==="am"){
+    if(!am || am==="None"){
+      result.missing_am++;
+      await recordTelegramNotifyLog({
+        context,
+        recipient:"am",
+        status:"missing",
+        source_id:sourceId,
+        task_id:task.id||null,
+        task_date:taskDate,
+        project,
+        person,
+        am,
+        error:"Missing AM",
+        detail:doneNotice
+      });
+    }else if(!amChatId){
+      result.missing_am++;
+      await recordTelegramNotifyLog({
+        context,
+        recipient:"am",
+        status:"missing",
+        source_id:sourceId,
+        task_id:task.id||null,
+        task_date:taskDate,
+        project,
+        person,
+        am,
+        error:"Missing AM telegram_chat_id",
+        detail:doneNotice
+      });
+      logDebug("⚠️ Không gửi được Telegram done cho AM vì thiếu telegram_chat_id",{source_id:sourceId,project,am});
+    }else{
+      const donePayload={
+        event:"done",
+        context,
+        recipient:"am",
+        source_id:sourceId,
+        task_id:task.id||null,
+        project,
+        task_date:taskDate,
+        result:"success",
+        person,
+        am,
+        type,
+        domain_url:rawDomain,
+        demo_link:demoLink,
+        person_chat_id:"",
+        am_chat_id:amChatId,
+        message:project
+      };
 
-  const donePayload={
-    event:"done",
-    context,
-    recipient:"am",
-    source_id:sourceId,
-    task_id:task.id||null,
-    project,
-    task_date:taskDate,
-    result:"success",
-    person,
-    am,
-    type,
-    domain_url:rawDomain,
-    demo_link:demoLink,
-    person_chat_id:"",
-    am_chat_id:amChatId,
-    message:project
-  };
-
-  try{
-    await sendTelegram(donePayload);
-    result.am_sent++;
-    await recordTelegramNotifyLog({
-      context,
-      recipient:"am",
-      status:"success",
-      source_id:sourceId,
-      task_id:task.id||null,
-      task_date:taskDate,
-      project,
-      person,
-      am,
-      chat_id:amChatId,
-      detail:doneNotice
-    });
-  }catch(e){
-    result.failed++;
-    await recordTelegramNotifyLog({
-      context,
-      recipient:"am",
-      status:"failed",
-      source_id:sourceId,
-      task_id:task.id||null,
-      task_date:taskDate,
-      project,
-      person,
-      am,
-      chat_id:amChatId,
-      error:e?.message||String(e),
-      detail:doneNotice
-    });
-    logDebug("⚠️ Gửi Telegram done cho AM lỗi",{source_id:sourceId,project,am,chat_id:amChatId,error:e?.message||String(e)});
+      try{
+        await sendTelegram(donePayload);
+        result.am_sent++;
+        await recordTelegramNotifyLog({
+          context,
+          recipient:"am",
+          status:"success",
+          source_id:sourceId,
+          task_id:task.id||null,
+          task_date:taskDate,
+          project,
+          person,
+          am,
+          chat_id:amChatId,
+          detail:doneNotice
+        });
+      }catch(e){
+        result.failed++;
+        await recordTelegramNotifyLog({
+          context,
+          recipient:"am",
+          status:"failed",
+          source_id:sourceId,
+          task_id:task.id||null,
+          task_date:taskDate,
+          project,
+          person,
+          am,
+          chat_id:amChatId,
+          error:e?.message||String(e),
+          detail:doneNotice
+        });
+        logDebug("⚠️ Gửi Telegram done cho AM lỗi",{source_id:sourceId,project,am,chat_id:amChatId,error:e?.message||String(e)});
+      }
+    }
   }
 
   return result;
@@ -6876,11 +6976,7 @@ async function resendTelegramForSelectedTasks(){
   const mode=document.getElementById("resendNotifyMode")?.value||"assign";
   const target=document.getElementById("resendNotifyTarget")?.value||"both";
   const targetLabel=target==="web"?"Web":target==="am"?"AM":"Web + AM";
-  if(mode==="done" && target==="web"){
-    toast("Thông báo task done chỉ gửi cho AM. Hãy chọn Chỉ gửi AM hoặc Web + AM.", "#8a6d00");
-    return;
-  }
-  const label=mode==="done"?`thông báo task done cho ${target==="both"?"AM":targetLabel}`:`thông báo assign task cho ${targetLabel}`;
+  const label=mode==="done"?`thông báo task done cho ${targetLabel}`:`thông báo assign task cho ${targetLabel}`;
   if(!confirm(`Gửi lại ${label} cho ${rows.length} task trong ngày ${document.getElementById("resendNotifyDate")?.value||""}?`))return;
   clearDebug();
   let total={web_sent:0,am_sent:0,missing_web:0,missing_am:0,failed:0};
@@ -6888,17 +6984,17 @@ async function resendTelegramForSelectedTasks(){
     const x=rows[i];
     try{
       const r=mode==="done"
-        ? await notifyOneDoneTask(x.task,x.queue,"manual_resend_done")
+        ? await notifyOneDoneTask(x.task,x.queue,"manual_resend_done",target)
         : await notifyOneAssignedTask(x.task,x.queue,"manual_resend",target);
       total.web_sent+=r.web_sent||0;
       total.am_sent+=r.am_sent||0;
       total.missing_web+=r.missing_web||0;
       total.missing_am+=r.missing_am||0;
       total.failed+=r.failed||0;
-      x.last_web=mode==="done"?"-":(target==="am"?"skipped":(r.web_sent?"sent":(r.missing_web?"missing":"-")));
-      x.last_am=(mode==="assign"&&target==="web")?"skipped":(r.am_sent?"sent":(r.missing_am?"missing":"-"));
+      x.last_web=target==="am"?"skipped":(r.web_sent?"sent":(r.missing_web?"missing":"-"));
+      x.last_am=target==="web"?"skipped":(r.am_sent?"sent":(r.missing_am?"missing":"-"));
       x.last_error=r.failed?"failed":"";
-      await logAction(mode==="done"?"telegram_resend_done":"telegram_resend",x.task.id||null,x.task.source_id||"",x.task.text||x.queue.project||"",x.task.person||"",mode==="done"?(r.done_notice||"Manual resend done notice to AM"):`Manual resend assign Telegram. Target ${targetLabel}. Web ${x.last_web}, AM ${x.last_am}`,x.task.am||x.queue.am||"");
+      await logAction(mode==="done"?"telegram_resend_done":"telegram_resend",x.task.id||null,x.task.source_id||"",x.task.text||x.queue.project||"",x.task.person||"",mode==="done"?`Manual resend done Telegram. Target ${targetLabel}. Web ${x.last_web}, AM ${x.last_am}\n\n${r.web_done_notice||""}\n\n${r.done_notice||""}`:`Manual resend assign Telegram. Target ${targetLabel}. Web ${x.last_web}, AM ${x.last_am}`,x.task.am||x.queue.am||"");
     }catch(e){
       total.failed++;
       x.last_error=e?.message||String(e);
