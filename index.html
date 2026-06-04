@@ -5805,19 +5805,67 @@ async function getQueueRowForDoneTask(t){
 
 async function toggleDone(t){
   if(!requireDb()||!canEdit)return;
+
+  const oldDone=!!t.done;
   t.done=!t.done;
   renderCalendarOnly();
-  const {error}=await supabaseClient.from("tasks").update({done:t.done}).eq("id",t.id);
-  if(error){toast(error.message,"#b71c1c");return}
 
   if(t.done){
-    const queueRow=await getQueueRowForDoneTask(t);
-    const doneNotice=await buildDoneAmNoticeText(t,queueRow);
-    await logAction("done",t.id,t.source_id||"",t.text,t.person,doneNotice,t.am);
-    const doneResult=await notifyOneDoneTask(t,queueRow,"calendar_done","both");
-    toast(`Đã done task. Web ${doneResult.web_sent||0}, AM ${doneResult.am_sent||0}, thiếu ID ${(doneResult.missing_web||0)+(doneResult.missing_am||0)}, lỗi ${doneResult.failed||0}`, doneResult.failed?"#8a6d00":"#2e7d32");
+    toast(`Đang đánh dấu hoàn thành: ${t.text||"Task"}...`, "#f05a28");
+  }else{
+    toast(`Đang bỏ hoàn thành: ${t.text||"Task"}...`, "#8a6d00");
+  }
+
+  const {error}=await supabaseClient
+    .from("tasks")
+    .update({done:t.done})
+    .eq("id",t.id);
+
+  if(error){
+    // Nếu update DB lỗi thì trả lại trạng thái cũ trên UI.
+    t.done=oldDone;
+    renderCalendarOnly();
+    toast("Lỗi cập nhật Done: "+error.message,"#b71c1c");
+    return;
+  }
+
+  if(t.done){
+    try{
+      const queueRow=await getQueueRowForDoneTask(t);
+      const doneNotice=await buildDoneAmNoticeText(t,queueRow);
+
+      await logAction(
+        "done",
+        t.id,
+        t.source_id||"",
+        t.text,
+        t.person,
+        doneNotice,
+        t.am
+      );
+
+      const doneResult=await notifyOneDoneTask(t,queueRow,"calendar_done","both");
+      const missing=(doneResult.missing_web||0)+(doneResult.missing_am||0);
+      const failed=doneResult.failed||0;
+      const color=failed?"#8a6d00":"#2e7d32";
+
+      toast(
+        `✅ Task done: ${t.text||"Task"} • Web ${doneResult.web_sent||0} • AM ${doneResult.am_sent||0} • Thiếu ID ${missing} • Lỗi ${failed}`,
+        color
+      );
+    }catch(e){
+      // Done đã lưu DB, nhưng lỗi ở bước gửi/log Telegram thì vẫn báo rõ cho user biết.
+      toast(`✅ Task đã Done nhưng lỗi gửi/log Telegram: ${e?.message||e}`, "#8a6d00");
+      logDebug("DONE NOTIFY ERROR", {
+        task_id:t.id,
+        source_id:t.source_id||"",
+        project:t.text||"",
+        error:e?.message||String(e)
+      });
+    }
   }else{
     await logAction("undone",t.id,t.source_id||"",t.text,t.person,"Toggle undone",t.am);
+    toast(`↩️ Đã bỏ Done: ${t.text||"Task"}`, "#8a6d00");
   }
 }
 
