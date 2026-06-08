@@ -4606,21 +4606,31 @@ async function getBulkAssignPlan(count){
   const team=webMembers();
 
   if(!team.length){
-    return Array.from({length:totalNeeded},()=>({
-      date:nextWorkdayFrom(todayStr()),
-      person:"Tony"
-    }));
+    return Array.from({length:totalNeeded},()=>(
+      {date:nextWorkdayFrom(todayStr()),person:"Tony",start_after_person:"",latest_calendar_date:""}
+    ));
   }
 
-  const orderedNames=team.map(m=>String(m.name||"").trim()).filter(Boolean);
+  const orderedTeam=team
+    .map((m,idx)=>({
+      ...m,
+      name:String(m.name||"").trim(),
+      _assignIndex:idx
+    }))
+    .filter(m=>m.name);
+
+  const orderedNames=orderedTeam.map(m=>m.name);
   const today=nextWorkdayFrom(todayStr());
 
   if(!orderedNames.length){
     throw new Error("Không có Web member Active role WEB/BOTH để assign.");
   }
 
-  // Load trước vài tháng gần nhất, các tháng xa hơn sẽ được load tiếp trong vòng lặp.
-  await loadOffDaysForDateSpan(today,120);
+  const memberIndex=new Map(orderedNames.map((name,idx)=>[name.toLowerCase(),idx]));
+
+  // Load trước vài tháng gần nhất để preview có thể check lịch off ngay trong app.
+  // RPC v4 vẫn là nguồn chia lịch thật khi Confirm.
+  await loadOffDaysForDateSpan(today,180);
 
   let data=[];
   let error=null;
@@ -4632,7 +4642,7 @@ async function getBulkAssignPlan(count){
       .in("person",orderedNames)
       .gte("task_date",today)
       .order("task_date",{ascending:true})
-      .limit(10000);
+      .limit(20000);
 
     data=res.data||[];
     error=res.error||null;
@@ -4648,7 +4658,8 @@ async function getBulkAssignPlan(count){
   const assignedByDate={};
 
   (data||[]).forEach(t=>{
-    if(!t.task_date||!orderedNames.includes(t.person))return;
+    const person=String(t.person||"").trim();
+    if(!t.task_date||!orderedNames.includes(person))return;
 
     const d=String(t.task_date).slice(0,10);
 
@@ -4656,23 +4667,52 @@ async function getBulkAssignPlan(count){
 
     if(!assignedByDate[d])assignedByDate[d]=new Set();
 
-    assignedByDate[d].add(t.person);
+    assignedByDate[d].add(person);
   });
 
   const dates=Object.keys(assignedByDate).sort();
-  let cursorDate=dates.length?dates[dates.length-1]:today;
+  const latestCalendarDate=dates.length?dates[dates.length-1]:"";
+  let cursorDate=latestCalendarDate || today;
 
-  if(cursorDate<today||isWeekendDate(cursorDate)){
+  if(cursorDate<today || isWeekendDate(cursorDate)){
     cursorDate=today;
+  }
+
+  // Quan trọng: ngày mới nhất trong Calendar phải tiếp tục từ người sau cùng theo Sort ID.
+  // Ví dụ ngày mới nhất đang tới Hayden thì task tiếp theo phải là Leo, không quay lại Tony/Alex.
+  let firstDayStartIndex=0;
+  let firstDayStartAfterPerson="";
+
+  if(latestCalendarDate && cursorDate===latestCalendarDate){
+    const latestSet=assignedByDate[latestCalendarDate] || new Set();
+    let maxIdx=-1;
+    latestSet.forEach(person=>{
+      const idx=memberIndex.get(String(person||"").toLowerCase());
+      if(Number.isFinite(idx) && idx>maxIdx){
+        maxIdx=idx;
+        firstDayStartAfterPerson=person;
+      }
+    });
+
+    firstDayStartIndex=maxIdx+1;
+
+    // Nếu ngày mới nhất đã chạy tới người cuối cùng thì qua ngày làm việc kế tiếp và quay lại Tony.
+    if(firstDayStartIndex>=orderedNames.length){
+      cursorDate=nextWorkdayAfter(cursorDate);
+      firstDayStartIndex=0;
+      firstDayStartAfterPerson="";
+    }
   }
 
   const result=[];
   const maxSearchDays=Math.max(1095,Math.ceil(totalNeeded/Math.max(1,orderedNames.length))*21+180);
   let searchedDays=0;
+  let isFirstCursorDay=true;
 
   while(result.length<totalNeeded && searchedDays<maxSearchDays){
     if(isWeekendDate(cursorDate)){
       cursorDate=nextWorkdayAfter(cursorDate);
+      isFirstCursorDay=false;
       continue;
     }
 
@@ -4683,13 +4723,14 @@ async function getBulkAssignPlan(count){
     if(!assignedByDate[cursorDate])assignedByDate[cursorDate]=new Set();
 
     const assignedSet=assignedByDate[cursorDate];
+    const startIndex=isFirstCursorDay ? firstDayStartIndex : 0;
     let addedThisDay=0;
 
-    // Fill theo Sort ID mỗi ngày. Nếu người đó đã có task hoặc off thì bỏ qua,
-    // người kế tiếp vẫn được nhận task. Nhờ vậy không bị kẹt khi 1 người off
-    // hoặc Calendar có dữ liệu thủ công bị lệch thứ tự.
-    for(const person of orderedNames){
+    for(let i=startIndex;i<orderedNames.length;i++){
       if(result.length>=totalNeeded)break;
+
+      const person=orderedNames[i];
+
       if(assignedSet.has(person))continue;
 
       if(isMemberOffOnDate(person,cursorDate)){
@@ -4699,7 +4740,9 @@ async function getBulkAssignPlan(count){
 
       result.push({
         date:cursorDate,
-        person
+        person,
+        latest_calendar_date:latestCalendarDate,
+        start_after_person:firstDayStartAfterPerson
       });
 
       assignedSet.add(person);
@@ -4708,8 +4751,8 @@ async function getBulkAssignPlan(count){
 
     if(result.length>=totalNeeded)break;
 
-    // Dù ngày đó có assign được hay không, sau khi quét hết team thì qua ngày làm việc kế tiếp.
     cursorDate=nextWorkdayAfter(cursorDate);
+    isFirstCursorDay=false;
 
     if(!addedThisDay){
       logDebug("Không có Web available trong ngày, chuyển sang ngày làm việc kế tiếp", {date:cursorDate});
@@ -4728,6 +4771,8 @@ async function getBulkAssignPlan(count){
       searched_days:searchedDays,
       max_search_days:maxSearchDays,
       team:orderedNames,
+      latest_calendar_date:latestCalendarDate,
+      start_after_person:firstDayStartAfterPerson,
       off_summary:offSummary
     });
 
@@ -4737,7 +4782,9 @@ async function getBulkAssignPlan(count){
   console.table(result.map((x,idx)=>({
     no:idx+1,
     date:x.date,
-    person:x.person
+    person:x.person,
+    latest_calendar_date:x.latest_calendar_date||"",
+    start_after_person:x.start_after_person||""
   })));
 
   return result;
