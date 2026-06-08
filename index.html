@@ -1339,6 +1339,53 @@ let selectedQueue=null,selectedDay=null,editingTask=null,editingMember=null,drag
 let queueRenderToken=0;
 let canEdit=localStorage.getItem("tm_canEdit")==="1";
 
+/* ===== Realtime debounce / anti-freeze for bulk assign =====
+   Khi RPC assign batch update nhiều dòng tasks/task_queue, Supabase Realtime có thể bắn hàng trăm event.
+   Nếu mỗi event đều gọi loadQueue()/render() sẽ làm Chrome báo Page Unresponsive.
+*/
+let bulkAssignBusy=false;
+let pendingRealtimeQueue=false;
+let pendingRealtimeCalendar=false;
+let queueRealtimeTimer=null;
+let calendarRealtimeTimer=null;
+
+function scheduleQueueReloadFromRealtime(){
+  if(bulkAssignBusy){
+    pendingRealtimeQueue=true;
+    return;
+  }
+  clearTimeout(queueRealtimeTimer);
+  queueRealtimeTimer=setTimeout(()=>{
+    loadQueue().catch(e=>console.warn("Realtime loadQueue failed",e));
+  },900);
+}
+
+function scheduleCalendarReloadFromRealtime(){
+  if(bulkAssignBusy){
+    pendingRealtimeCalendar=true;
+    return;
+  }
+  clearTimeout(calendarRealtimeTimer);
+  calendarRealtimeTimer=setTimeout(()=>{
+    render().catch(e=>console.warn("Realtime render failed",e));
+  },900);
+}
+
+async function flushPendingRealtimeAfterBulkAssign(){
+  const needQueue=pendingRealtimeQueue;
+  const needCalendar=pendingRealtimeCalendar;
+  pendingRealtimeQueue=false;
+  pendingRealtimeCalendar=false;
+  clearTimeout(queueRealtimeTimer);
+  clearTimeout(calendarRealtimeTimer);
+  if(needCalendar){
+    await render();
+  }else if(needQueue){
+    await loadQueue();
+  }
+}
+
+
 function esc(s){return String(s??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]))}
 function toast(msg,color="#333"){toastEl=document.getElementById("toast");toastEl.textContent=msg;toastEl.style.background=color;toastEl.classList.add("show");setTimeout(()=>toastEl.classList.remove("show"),1800)}
 function logDebug(...args){console.log(...args);const b=document.getElementById("debugBox");if(!b)return;const msg=args.map(x=>typeof x==="string"?x:JSON.stringify(x,null,2)).join(" ");b.textContent+="\n"+msg;b.scrollTop=b.scrollHeight}
@@ -5209,7 +5256,9 @@ function renderAssignValidateModal(plan){
     ${(plan.global_warnings||[]).length?`<br><span class="badge urgent">${esc(plan.global_warnings.join(" • "))}</span>`:""}
     <div class="report-note">Confirm assign vẫn chạy qua Supabase RPC, database sẽ kiểm tra an toàn lần cuối. Task đã có trong Calendar từ hôm nay sẽ được restore/bỏ qua, không assign trùng.</div>
   `;
-  body.innerHTML=(plan.rows||[]).map(r=>`<tr>
+  const validateRows=(plan.rows||[]);
+  const visibleValidateRows=validateRows.slice(0,200);
+  body.innerHTML=visibleValidateRows.map(r=>`<tr>
     <td><b>${esc(r.project)}</b><br><span class="muted">${esc(r.source_id)}</span></td>
     <td>${esc(r.am||"")}</td>
     <td>${esc(r.domain||"")}</td>
@@ -5423,6 +5472,10 @@ async function runBulkAssignSelectedNow(skipConfirm=false){
   const oldBtnText=assignBtn?assignBtn.textContent:"";
 
   try{
+    bulkAssignBusy=true;
+    pendingRealtimeQueue=false;
+    pendingRealtimeCalendar=false;
+
     if(assignBtn){
       assignBtn.disabled=true;
       assignBtn.textContent="Đang assign...";
@@ -5493,6 +5546,12 @@ async function runBulkAssignSelectedNow(skipConfirm=false){
     toast("Lỗi assign batch: "+(e.message||e), "#b71c1c");
     await sendTrackingLog("assign_batch_error",{result:"failed",error:e?.message||String(e),detail:"Bulk assign RPC v4 off-days failed"});
   }finally{
+    bulkAssignBusy=false;
+    try{
+      await flushPendingRealtimeAfterBulkAssign();
+    }catch(e){
+      console.warn("Flush realtime sau assign batch lỗi", e);
+    }
     if(assignBtn){
       assignBtn.disabled=false;
       assignBtn.textContent=oldBtnText||"Assign batch";
@@ -7253,6 +7312,9 @@ async function sendBulkAssignNotifications(assignedRows, originalQueueRows=[], c
       "#f05a28"
     );
     await yieldUi();
+    if(assignedRows.length>20){
+      await sleep(80);
+    }
   }
 
   logDebug("Assign Telegram detail",result);
@@ -7276,9 +7338,12 @@ setupUi();
 
     supabaseClient
       .channel("tasks-rt")
-      .on("postgres_changes",{event:"*",schema:"public",table:"tasks"},render)
-      .on("postgres_changes",{event:"*",schema:"public",table:"task_queue"},loadQueue)
-      .on("postgres_changes",{event:"*",schema:"public",table:"members"},loadMembers)
+      .on("postgres_changes",{event:"*",schema:"public",table:"tasks"},scheduleCalendarReloadFromRealtime)
+      .on("postgres_changes",{event:"*",schema:"public",table:"task_queue"},scheduleQueueReloadFromRealtime)
+      .on("postgres_changes",{event:"*",schema:"public",table:"members"},()=>{
+        clearTimeout(window._membersRtTimer);
+        window._membersRtTimer=setTimeout(()=>loadMembers(),900);
+      })
       .subscribe();
   }else{
     members=FALLBACK_MEMBERS;
