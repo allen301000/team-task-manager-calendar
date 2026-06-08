@@ -5158,10 +5158,16 @@ async function runAutoAssignAfterSync(){
     return;
   }
 
-  const plan=await buildAssignValidationPlan(candidates,[]);
-  await sendAssignAdminNotice("[AUTO ASSIGN] Validate trước khi assign", plan);
-
   try{
+    await sendAssignAdminNotice("[AUTO ASSIGN] Bắt đầu chạy", {
+      assign_count:candidates.length,
+      rows:candidates.slice(0,30).map(r=>({
+        project:r.project||r.source_id,
+        am:r.am||"",
+        source_id:r.source_id||""
+      }))
+    });
+
     toast(`Auto assign đang chạy ${candidates.length} project bằng RPC v4, có tính ngày off...`, "#f05a28");
 
     const rpcResult=await assignRowsWithRpcOffDays(candidates,"auto_assign");
@@ -5337,26 +5343,13 @@ function renderAssignValidateModal(plan){
 }
 
 async function bulkAssignSelected(){
-  if(!requireDb())return;
-  const {selectedIds,selectedRows,skippedByUi}=getSelectedQueueAssignRowsForValidation();
-  if(!selectedIds.length){toast("Chưa chọn project nào để assign batch", "#8a6d00");return;}
-  if(!selectedRows.length){
-    toast("Các project đã chọn đã assign rồi hoặc không còn trạng thái NEW", "#8a6d00");
-    logDebug("Assign batch bỏ qua ở UI", skippedByUi.map(r=>({source_id:r.source_id,project:r.project,assigned_person:r.assigned_person,assigned_date:r.assigned_date,assigned_month:r.assigned_month,queue_status:r.queue_status})));
-    return;
-  }
-  try{
-    toast("Đang validate trước khi assign...", "#f05a28");
-    const plan=await buildAssignValidationPlan(selectedRows,skippedByUi);
-    renderAssignValidateModal(plan);
-  }catch(e){
-    console.error(e);
-    toast("Lỗi validate: "+(e.message||e), "#b71c1c");
-    logDebug("VALIDATE ASSIGN ERROR", e.message||String(e));
-  }
+  // Bỏ bước Validate preview để tránh treo/trễ khi có nhiều task hoặc lịch off phức tạp.
+  // Assign batch chạy thẳng RPC v4, database sẽ tự kiểm tra an toàn, đọc lịch off và không assign trùng Calendar.
+  await runBulkAssignSelectedNow(false);
 }
 
 async function confirmValidatedAssignBatch(){
+  // Giữ hàm này để không lỗi nếu còn modal cũ trong HTML, nhưng flow mới không dùng Validate nữa.
   closeModal("assignValidateModal");
   await runBulkAssignSelectedNow(true);
 }
