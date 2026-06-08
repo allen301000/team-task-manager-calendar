@@ -1304,6 +1304,7 @@ const BOOTSTRAP_CONFIG={
   settingsProfile:"default"
 };
 const TYPES=["Design + QR","Design","Menu + QR","Custom + QR","Menu","QR"];
+const ASSIGN_BATCH_RPC_NAME="assign_batch_queue_v4_off_days";
 const PACKAGE_POINTS={"Gói S":1,"Gói P":1,"Gói G":1.2,"Gói F":1.2,"Gói Menu + QR":1.5,"Gói Custom":2};
 const FALLBACK_MEMBERS=[
   {name:"Tony",role:"WEB",telegram_chat_id:"1767769751",active:true,color:"#ff8a80",max_per_day:6,sort_order:1},
@@ -4985,33 +4986,135 @@ async function sendAssignAdminNotice(title, planOrResult={}){
   }
 }
 
+
+async function assignRowsWithRpcOffDays(selectedRows, context="assign_batch"){
+  if(!requireDb())throw new Error("Chưa cấu hình Supabase");
+
+  const rows=sortQueuePriorityThenSheet(selectedRows||[]);
+  const sourceIds=[...new Set(rows.map(r=>String(r.source_id||"").trim()).filter(Boolean))];
+  const profile=String(settings.settingsProfile||"default").trim()||"default";
+
+  if(!sourceIds.length){
+    return {rawRows:[],assignedRows:[],restoredRows:[],skippedRows:[]};
+  }
+
+  logDebug("Assign RPC v4 off-days request",{
+    rpc:ASSIGN_BATCH_RPC_NAME,
+    profile,
+    count:sourceIds.length,
+    source_ids:sourceIds
+  });
+
+  const {data,error}=await supabaseClient.rpc(ASSIGN_BATCH_RPC_NAME,{
+    p_source_ids:sourceIds,
+    p_profile:profile
+  });
+
+  if(error){
+    const msg=String(error.message||error.details||error.hint||JSON.stringify(error));
+    if(msg.includes("function")||msg.includes(ASSIGN_BATCH_RPC_NAME)){
+      throw new Error(
+        `Không gọi được RPC ${ASSIGN_BATCH_RPC_NAME}. Hãy chạy SQL tạo function v4 off-days trong Supabase trước. Chi tiết: ${msg}`
+      );
+    }
+    throw new Error(msg);
+  }
+
+  const rawRows=Array.isArray(data)?data:[];
+  const assignedRows=rawRows.filter(r=>!r.skipped_reason);
+  const restoredRows=rawRows.filter(r=>r.skipped_reason==="already_exists_in_calendar_restored");
+  const skippedRows=rawRows.filter(r=>r.skipped_reason&&r.skipped_reason!=="already_exists_in_calendar_restored");
+
+  logDebug("Assign RPC v4 off-days result",{
+    context,
+    total_returned:rawRows.length,
+    assigned:assignedRows.length,
+    restored:restoredRows.length,
+    skipped:skippedRows.length,
+    skipped_rows:skippedRows
+  });
+
+  await sendTrackingLog(`${context}_rpc_v4_off_days`,{
+    result:"success",
+    detail:`RPC ${ASSIGN_BATCH_RPC_NAME}: assigned ${assignedRows.length}, restored ${restoredRows.length}, skipped ${skippedRows.length}`,
+    assigned_count:assignedRows.length,
+    restored_count:restoredRows.length,
+    skipped_count:skippedRows.length,
+    payload:{profile,source_ids:sourceIds,skipped_rows:skippedRows}
+  });
+
+  return {rawRows,assignedRows,restoredRows,skippedRows};
+}
+
+
 async function runAutoAssignAfterSync(){
   if(!settings.autoAssignEnabled)return;
   if(!requireDb())return;
+
   await ensureMembersReadyForNotify();
+
   const candidates=sortQueuePriorityThenSheet((queueRows||[]).filter(r=>{
     const status=String(r.queue_status||"NEW").trim();
     return status==="NEW" && !isQueueAssigned(r) && shouldShowInCurrentQueue(r) && !!r.domain_notified;
   }));
+
   if(!candidates.length){
     logDebug("Auto Assign: không có project NEW đã báo domain để assign");
     await sendAssignAdminNotice("[AUTO ASSIGN] Không có task cần assign", {assign_count:0,warning_count:0,rows:[]});
     return;
   }
+
   const plan=await buildAssignValidationPlan(candidates,[]);
   await sendAssignAdminNotice("[AUTO ASSIGN] Validate trước khi assign", plan);
+
   try{
-    toast(`Auto assign đang chạy ${candidates.length} project, có tính ngày off...`, "#f05a28");
-    const assignedRows=await assignRowsInAppWithOffDays(candidates);
-    const skippedRows=[];
-    let notifyResult={sent:0,missing:0,failed:0};
+    toast(`Auto assign đang chạy ${candidates.length} project bằng RPC v4, có tính ngày off...`, "#f05a28");
+
+    const rpcResult=await assignRowsWithRpcOffDays(candidates,"auto_assign");
+    const assignedRows=rpcResult.assignedRows||[];
+    const restoredRows=rpcResult.restoredRows||[];
+    const skippedRows=rpcResult.skippedRows||[];
+
+    let notifyResult={sent:0,web_sent:0,am_sent:0,missing:0,missing_web:0,missing_am:0,failed:0};
+
     if(assignedRows.length){
-      notifyResult=await sendBulkAssignNotifications(assignedRows,candidates);
+      notifyResult=await sendBulkAssignNotifications(assignedRows,candidates,"auto_assign");
     }
-    await sendAssignAdminNotice("[AUTO ASSIGN] Đã chạy xong", {assigned_count:assignedRows.length,skipped_count:skippedRows.length,telegram_sent:notifyResult.sent||0,rows:assignedRows.map(r=>({project:r.project,person:r.person,task_date:r.task_date}))});
-    await sendTrackingLog("auto_assign_done",{result:"success",assigned_count:assignedRows.length,skipped_count:skippedRows.length,telegram_result:notifyResult,detail:"Auto assign off-days aware"});
+
+    const adminRows=[
+      ...assignedRows.map(r=>({project:r.project,person:r.person,task_date:r.task_date,am:r.am})),
+      ...restoredRows.map(r=>({project:`RESTORE: ${r.project}`,person:r.person,task_date:r.task_date,am:r.am})),
+      ...skippedRows.map(r=>({project:`SKIP: ${r.project||r.source_id} — ${r.skipped_reason}`,person:"",task_date:"",am:r.am||""}))
+    ];
+
+    await sendAssignAdminNotice("[AUTO ASSIGN] Đã chạy xong", {
+      assigned_count:assignedRows.length,
+      restored_count:restoredRows.length,
+      skipped_count:skippedRows.length,
+      telegram_sent:notifyResult.sent||0,
+      telegram_web:notifyResult.web_sent||0,
+      telegram_am:notifyResult.am_sent||0,
+      telegram_missing:notifyResult.missing||0,
+      telegram_failed:notifyResult.failed||0,
+      rows:adminRows
+    });
+
+    await sendTrackingLog("auto_assign_done",{
+      result:"success",
+      assigned_count:assignedRows.length,
+      restored_count:restoredRows.length,
+      skipped_count:skippedRows.length,
+      telegram_result:notifyResult,
+      detail:`Auto assign RPC v4 off-days. Web sent ${notifyResult.web_sent||0}, AM sent ${notifyResult.am_sent||0}, missing ${notifyResult.missing||0}, failed ${notifyResult.failed||0}`
+    });
+
     await loadQueue();
-    toast(`Auto assign xong: ${assignedRows.length} task`, "#2e7d32");
+
+    toast(
+      `Auto assign xong: ${assignedRows.length} task • Web ${notifyResult.web_sent||0} • AM ${notifyResult.am_sent||0} • thiếu ID ${notifyResult.missing||0}`,
+      notifyResult.failed ? "#8a6d00" : "#2e7d32"
+    );
+
   }catch(e){
     await sendAssignAdminNotice("[AUTO ASSIGN] Lỗi", {assigned_count:0,skipped_count:0,rows:[{project:e?.message||String(e)}]});
     await sendTrackingLog("auto_assign_error",{result:"failed",error:e?.message||String(e)});
@@ -5019,6 +5122,7 @@ async function runAutoAssignAfterSync(){
     logDebug("AUTO ASSIGN ERROR", e?.message||String(e));
   }
 }
+
 
 async function buildAssignValidationPlan(selectedRows, skippedByUi=[]){
   await ensureMembersReadyForNotify();
@@ -5304,10 +5408,10 @@ async function runBulkAssignSelectedNow(skipConfirm=false){
 
   if(!skipConfirm){
     const ok=confirm(
-      `Assign batch ${selectedRows.length} project?\n\n`+
+      `Assign batch ${selectedRows.length} project bằng RPC v4?\n\n`+
       `Rule: theo Sort ID team Web, chỉ T2-T6.\n`+
-      `Nếu Web off đúng ngày đó thì hệ thống bỏ qua người đó và assign người tiếp theo trong thứ tự.\n`+
-      `Hết vòng sẽ tự chuyển sang ngày làm việc kế tiếp.\n`+
+      `RPC sẽ đọc lịch off từ app_settings theo profile: ${settings.settingsProfile||"default"}.\n`+
+      `Nếu Web off đúng ngày đó thì hệ thống bỏ qua người đó và assign người kế tiếp.\n`+
       (skippedByUi.length?`\nĐã bỏ qua ${skippedByUi.length} project đã assign ở UI.`:"")
     );
 
@@ -5325,18 +5429,36 @@ async function runBulkAssignSelectedNow(skipConfirm=false){
     }
 
     clearDebug();
-    await sendTrackingLog("assign_batch_start",{result:"info",detail:`Start off-days aware assign batch ${selectedRows.length} project`,payload:{source_ids:selectedRows.map(r=>r.source_id)}});
-    toast("Đang lập lịch assign có tính ngày off...", "#f05a28");
+    await sendTrackingLog("assign_batch_start",{
+      result:"info",
+      detail:`Start assign batch ${selectedRows.length} project via RPC v4 off-days`,
+      payload:{source_ids:selectedRows.map(r=>r.source_id),profile:settings.settingsProfile||"default"}
+    });
 
-    const assignedRows=await assignRowsInAppWithOffDays(selectedRows);
-    const skippedRows=[];
+    toast("Đang assign trong Supabase RPC v4 có tính ngày off...", "#f05a28");
 
-    let notifyResult={sent:0,missing:0,failed:0};
+    const rpcResult=await assignRowsWithRpcOffDays(selectedRows,"assign_batch");
+    const assignedRows=rpcResult.assignedRows||[];
+    const restoredRows=rpcResult.restoredRows||[];
+    const skippedRows=rpcResult.skippedRows||[];
+
+    let notifyResult={sent:0,web_sent:0,am_sent:0,missing:0,missing_web:0,missing_am:0,failed:0};
+
     if(assignedRows.length){
       if(assignBtn)assignBtn.textContent="Đang gửi Telegram...";
-      toast(`Đã assign ${assignedRows.length} task. Đang gửi Telegram...`, "#f05a28");
-      notifyResult=await sendBulkAssignNotifications(assignedRows, selectedRows);
+      toast(`Đã assign ${assignedRows.length} task. Đang gửi Telegram Web + AM...`, "#f05a28");
+      notifyResult=await sendBulkAssignNotifications(assignedRows, selectedRows, "assign_batch");
       logDebug("Assign batch Telegram result", notifyResult);
+    }
+
+    if(restoredRows.length){
+      logDebug("Không gửi Telegram cho task restored để tránh gửi trùng", restoredRows.map(r=>({
+        source_id:r.source_id,
+        project:r.project,
+        person:r.person,
+        task_date:r.task_date,
+        am:r.am
+      })));
     }
 
     document.querySelectorAll(".queue-domain-check").forEach(cb=>cb.checked=false);
@@ -5349,10 +5471,18 @@ async function runBulkAssignSelectedNow(skipConfirm=false){
 
     const sec=Math.round((Date.now()-startedAt)/1000);
     toast(
-      `Assign xong: ${assignedRows.length} task, ${skippedRows.length} bỏ qua. Telegram: ${notifyResult.sent} gửi, ${notifyResult.missing} thiếu ID (${sec}s)`,
-      "#2e7d32"
+      `Assign xong: ${assignedRows.length} mới, ${restoredRows.length} restore, ${skippedRows.length} bỏ qua • Web ${notifyResult.web_sent||0} • AM ${notifyResult.am_sent||0} • thiếu ID ${notifyResult.missing||0} (${sec}s)`,
+      notifyResult.failed ? "#8a6d00" : "#2e7d32"
     );
-    await sendTrackingLog("assign_batch_done",{result:"success",detail:`Assigned ${assignedRows.length}, skipped ${skippedRows.length}, telegram sent ${notifyResult.sent}; off-days aware`,assigned_count:assignedRows.length,skipped_count:skippedRows.length,telegram_result:notifyResult});
+
+    await sendTrackingLog("assign_batch_done",{
+      result:"success",
+      detail:`Assigned ${assignedRows.length}, restored ${restoredRows.length}, skipped ${skippedRows.length}, Web ${notifyResult.web_sent||0}, AM ${notifyResult.am_sent||0}`,
+      assigned_count:assignedRows.length,
+      restored_count:restoredRows.length,
+      skipped_count:skippedRows.length,
+      telegram_result:notifyResult
+    });
 
     await loadQueue();
     showPage("calendar");
@@ -5361,7 +5491,7 @@ async function runBulkAssignSelectedNow(skipConfirm=false){
     console.error("Bulk assign failed", e);
     logDebug("ASSIGN / TELEGRAM ERROR", e.message||e);
     toast("Lỗi assign batch: "+(e.message||e), "#b71c1c");
-    await sendTrackingLog("assign_batch_error",{result:"failed",error:e?.message||String(e),detail:"Bulk assign off-days aware failed"});
+    await sendTrackingLog("assign_batch_error",{result:"failed",error:e?.message||String(e),detail:"Bulk assign RPC v4 off-days failed"});
   }finally{
     if(assignBtn){
       assignBtn.disabled=false;
@@ -5369,6 +5499,7 @@ async function runBulkAssignSelectedNow(skipConfirm=false){
     }
   }
 }
+
 
 async function ensureMembersReadyForNotify(){
   if(members && members.length)return;
@@ -7057,31 +7188,77 @@ async function resendTelegramForSelectedTasks(){
   toast(`Gửi lại xong (${targetLabel}). Web ${total.web_sent}, AM ${total.am_sent}, thiếu ID ${total.missing_web+total.missing_am}, lỗi ${total.failed}`, total.failed?"#8a6d00":"#2e7d32");
 }
 
-async function sendBulkAssignNotifications(assignedRows, originalQueueRows=[]){
+async function sendBulkAssignNotifications(assignedRows, originalQueueRows=[], context="assign_batch"){
   const result={sent:0,web_sent:0,am_sent:0,missing:0,missing_web:0,missing_am:0,failed:0,skipped:0};
   await ensureMembersReadyForNotify();
+
   const queueById=new Map((originalQueueRows||[]).map(r=>[String(r.source_id||""),r]));
+
   if(!settings.telegramWebhook){
     logDebug("⚠️ Chưa cấu hình Telegram webhook, assign đã xong nhưng chưa thể gửi thông báo",{assigned_count:assignedRows.length});
     result.failed=assignedRows.length;
     return result;
   }
+
   for(let i=0;i<assignedRows.length;i++){
     const item=assignedRows[i];
     const sourceId=String(item.source_id||"").trim();
     const queueRow=queueById.get(sourceId)||{};
-    const task={id:item.task_id||null,source_id:sourceId,text:item.project||queueRow.project||sourceId,person:item.person||"",task_date:item.task_date||"",type:item.task_type||item.type||"",am:item.am||queueRow.am||""};
-    const one=await notifyOneAssignedTask(task,queueRow,"assign_batch_auto");
-    result.web_sent+=one.web_sent; result.am_sent+=one.am_sent; result.missing_web+=one.missing_web; result.missing_am+=one.missing_am; result.failed+=one.failed;
-    result.sent=result.web_sent+result.am_sent; result.missing=result.missing_web+result.missing_am;
-    try{await logAction("assign",item.task_id||null,sourceId,task.text,task.person,`Assigned by RPC batch / AM ${task.am||"None"}. Telegram web ${one.web_sent}, am ${one.am_sent}, failed ${one.failed}`,task.am||"");}
-    catch(logErr){console.warn("Assign log failed",logErr);}
-    toast(`Đang gửi Telegram ${i+1}/${assignedRows.length}. Web: ${result.web_sent}, AM: ${result.am_sent}, thiếu ID: ${result.missing}`, "#f05a28");
+
+    const project=String(item.project||queueRow.project||sourceId).trim();
+    const person=String(item.person||"").trim();
+    const taskDate=String(item.task_date||"").slice(0,10);
+    const type=String(item.task_type||item.type||pickAssignTypeFromProject(project)).trim();
+
+    const amInfo=resolveAssignAm(item.am||queueRow.am||"None",{...queueRow,source_id:sourceId,project});
+    const am=amInfo.name||"None";
+
+    const task={
+      id:item.task_id||null,
+      source_id:sourceId,
+      text:project,
+      person,
+      task_date:taskDate,
+      type,
+      am
+    };
+
+    const one=await notifyOneAssignedTask(task,queueRow,context,"both");
+
+    result.web_sent+=one.web_sent||0;
+    result.am_sent+=one.am_sent||0;
+    result.missing_web+=one.missing_web||0;
+    result.missing_am+=one.missing_am||0;
+    result.failed+=one.failed||0;
+    result.skipped+=(one.skipped_web||0)+(one.skipped_am||0);
+    result.sent=result.web_sent+result.am_sent;
+    result.missing=result.missing_web+result.missing_am;
+
+    try{
+      await logAction(
+        context==="auto_assign"?"auto_assign":"assign",
+        item.task_id||null,
+        sourceId,
+        project,
+        person,
+        `${context}: assigned / AM ${am}. Telegram Web ${one.web_sent||0}, AM ${one.am_sent||0}, missing Web ${one.missing_web||0}, missing AM ${one.missing_am||0}, failed ${one.failed||0}`,
+        am
+      );
+    }catch(logErr){
+      console.warn("Assign log failed",logErr);
+    }
+
+    toast(
+      `Đang gửi Telegram ${i+1}/${assignedRows.length}. Web: ${result.web_sent}, AM: ${result.am_sent}, thiếu ID: ${result.missing}, lỗi: ${result.failed}`,
+      "#f05a28"
+    );
     await yieldUi();
   }
-  logDebug("Assign batch Telegram detail",result);
+
+  logDebug("Assign Telegram detail",result);
   return result;
 }
+
 
 
 initClient();
