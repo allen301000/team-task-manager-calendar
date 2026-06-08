@@ -5176,10 +5176,27 @@ async function buildAssignValidationPlan(selectedRows, skippedByUi=[]){
   const today=nextWorkdayFrom(todayStr());
   const sourceIds=[...new Set((selectedRows||[]).map(r=>String(r.source_id||"").trim()).filter(Boolean))];
   const people=webMembers();
-  const schedule=await estimateAssignSchedule(selectedRows||[]);
-  const scheduleById=new Map(schedule.map(x=>[String(x.source_id||""),x]));
   const warnings=[];
   const existingMap=new Map();
+
+  let schedule=[];
+  let scheduleError="";
+
+  try{
+    schedule=await estimateAssignSchedule(selectedRows||[]);
+  }catch(e){
+    scheduleError=e?.message||String(e);
+    // IMPORTANT: Validate chỉ dùng để preview. Không được chặn Assign batch,
+    // vì RPC v4 trong Supabase mới là nơi chia lịch thật và có đọc lịch off.
+    warnings.push(
+      "Preview lịch assign trong app chưa lập đủ: "+scheduleError+
+      ". Vẫn có thể Confirm assign để RPC v4 tự tính lịch thật theo off-days."
+    );
+    logDebug("⚠️ Validate preview schedule failed nhưng không chặn RPC v4", {error:scheduleError});
+    schedule=[];
+  }
+
+  const scheduleById=new Map(schedule.map(x=>[String(x.source_id||""),x]));
 
   if(sourceIds.length){
     for(const chunk of chunkList(sourceIds,100)){
@@ -5211,9 +5228,10 @@ async function buildAssignValidationPlan(selectedRows, skippedByUi=[]){
     const rowWarnings=[];
 
     if(existing)rowWarnings.push(`Đã có Calendar từ hôm nay: ${existing.person||"-"} / ${String(existing.task_date||"").slice(0,10)}`);
+    if(scheduleError)rowWarnings.push("Ngày/Web dự kiến chỉ là preview fallback; RPC v4 sẽ chia lịch thật khi Confirm");
     if(plannedWeb && !String(plannedWeb.telegram_chat_id||"").trim())rowWarnings.push(`Web ${plannedWeb.name} thiếu Telegram ID`);
-    if(plannedWeb && isMemberOffOnDate(plannedWeb.name,sch.planned_date))rowWarnings.push(`Web ${plannedWeb.name} đang off ngày ${sch.planned_date}`);
-    if(!plannedWeb)rowWarnings.push("Không có Web active để nhận task");
+    if(plannedWeb && sch.planned_date && isMemberOffOnDate(plannedWeb.name,sch.planned_date))rowWarnings.push(`Web ${plannedWeb.name} đang off ngày ${sch.planned_date}`);
+    if(!plannedWeb && !scheduleError)rowWarnings.push("Không có Web active để nhận task");
     if(amInfo.name && amInfo.name!=="None" && (!amMember || !String(amMember.telegram_chat_id||"").trim()))rowWarnings.push(`AM ${amInfo.name} thiếu Telegram ID hoặc chưa có trong Members`);
     if(!r.domain_notified)rowWarnings.push("Chưa báo domain");
     if(!String(r.domain_url||"").trim())rowWarnings.push("Domain trống / sub");
@@ -5223,8 +5241,8 @@ async function buildAssignValidationPlan(selectedRows, skippedByUi=[]){
       project,
       am:amInfo.name||String(r.am||""),
       domain:String(r.domain_url||"").trim()||"sub",
-      planned_web:plannedWeb?.name||sch.planned_web||"-",
-      planned_date:sch.planned_date||today,
+      planned_web:plannedWeb?.name||sch.planned_web||(scheduleError?"RPC tự tính":"-"),
+      planned_date:sch.planned_date||(scheduleError?"RPC tự tính":today),
       warnings:rowWarnings
     };
   });
@@ -5238,6 +5256,7 @@ async function buildAssignValidationPlan(selectedRows, skippedByUi=[]){
     warning_count:warningCount,
     started_from:today,
     global_warnings:warnings,
+    schedule_error:scheduleError,
     rows
   };
 }
