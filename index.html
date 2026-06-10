@@ -4094,23 +4094,51 @@ async function unassignQueue(sourceId){
   await Promise.all([loadQueue(),render()]);
 }
 
-async function openAssign(id){
-  selectedQueue=queueRows.find(r=>r.source_id===id);
-  if(!selectedQueue)return;
+function suggestManualPersonFast(){
+  const names = peopleNames();
 
-  const sheetAm=selectedQueue.am||"None";
+  if(!names.length){
+    return "Tony";
+  }
+
+  return names[0];
+}
+
+function openAssignFromQueue(sourceId){
+  if(!sourceId){
+    toast("Không tìm thấy source id", "#b71c1c");
+    return;
+  }
+
+  return openAssign(sourceId);
+}
+
+async function openAssign(id){
+  selectedQueue = queueRows.find(r =>
+    String(r.source_id || "").trim() === String(id || "").trim()
+  );
+
+  if(!selectedQueue){
+    toast("Không tìm thấy project trong queue", "#b71c1c");
+    return;
+  }
+
+  const sheetAm = selectedQueue.am || "None";
+
   refreshDropdowns(sheetAm);
 
-  const nextSlot=await getNextAssignSlot();
+  const manualDate = nextWorkdayFrom(todayStr());
+  const firstPerson = suggestManualPersonFast();
 
-  assignTitle.textContent="Assign — "+selectedQueue.source_id;
-  assignText.value=selectedQueue.project;
-  assignAM.value=sheetAm;
-  assignDate.value=nextSlot.date;
-  assignType.value=inferType(selectedQueue);
-  assignPriority.value="Normal";
-  assignPerson.value=nextSlot.person;
-  assignNote.value=selectedQueue.note||"";
+  assignTitle.textContent = "Assign — " + selectedQueue.source_id;
+  assignText.value = selectedQueue.project || selectedQueue.source_id || "";
+  assignAM.value = sheetAm;
+  assignDate.value = manualDate;
+  assignType.value = inferType(selectedQueue);
+  assignPriority.value = "Normal";
+  assignPerson.value = firstPerson;
+  assignNote.value = selectedQueue.note || "";
+
   openModal("assignModal");
 }
 function inferType(r){
